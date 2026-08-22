@@ -1,156 +1,62 @@
-import puppeteer from "@cloudflare/puppeteer";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-const GITHUB_BASE =
+const GITHUB_RAW_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
-function cleanBase64(value) {
-  if (!value) return "";
-
-  if (typeof value !== "string") {
-    throw new Error("Base64 harus berupa string");
-  }
-
-  return value
-    .replace(/^data:.*?;base64,/, "")
-    .replace(/^<img[^>]+src=["']data:.*?;base64,/, "")
-    .replace(/["'>\s]/g, "");
-}
-
-function escapeHtml(value) {
-  if (value === null || value === undefined) return "";
-
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function replacePlaceholders(html, data) {
-  let result = html;
-
-  for (let i = 1; i <= 12; i++) {
-    const key = `S${numberToWord(i)}`;
-    const value = data[key] ?? "";
-
-    result = result.replaceAll(
-      `{{${key}}}`,
-      escapeHtml(value)
-    );
-
-    result = result.replaceAll(
-      `[[${key}]]`,
-      escapeHtml(value)
-    );
-
-    result = result.replaceAll(
-      `__${key}__`,
-      escapeHtml(value)
-    );
-  }
-
-  return result;
-}
-
-function numberToWord(number) {
-  const words = [
-    "",
-    "Satu",
-    "Dua",
-    "Tiga",
-    "Empat",
-    "Lima",
-    "Enam",
-    "Tujuh",
-    "Delapan",
-    "Sembilan",
-    "Sepuluh",
-    "Sebelas",
-    "Duabelas"
-  ];
-
-  return words[number];
-}
-
-async function getTemplate(template) {
-  const name =
-    String(template || "Reguler")
-      .replace(".html", "")
-      .replace(".pdf", "")
-      .trim()
-      .toLowerCase();
-
-  let fileName = "Reguler.html";
-
-  if (name === "prekursor") {
-    fileName = "Prekursor.html";
-  }
-
-  const url = `${GITHUB_BASE}/${fileName}`;
-
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(
-      `Template ${fileName} gagal diambil dari GitHub. HTTP ${response.status}`
-    );
-  }
-
-  return await response.text();
-}
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=UTF-8"
-    }
-  });
-}
+const MASTER_PREKURSOR_URL =
+  `${GITHUB_RAW_BASE}/master_prekursor.csv`;
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
+
+    // =========================================================
+    // GET = HEALTH CHECK
+    // =========================================================
+    if (request.method === "GET") {
+      return jsonResponse({
+        success: true,
+        message: "SP GUARDIAN WORKER OK",
+        worker: "suratpesanan-guardian",
+        version: "FINAL-1"
+      });
+    }
+
+    // =========================================================
+    // ONLY POST
+    // =========================================================
+    if (request.method !== "POST") {
+      return jsonResponse({
+        success: false,
+        error: "Method not allowed"
+      }, 405);
+    }
+
     try {
-      if (request.method === "GET") {
-        return jsonResponse({
-          success: true,
-          worker: "SP GUARDIAN",
-          status: "online",
-          message: "Worker siap menerima POST JSON"
-        });
-      }
 
-      if (request.method !== "POST") {
-        return jsonResponse(
-          {
-            success: false,
-            error: "Method harus POST"
-          },
-          405
-        );
-      }
-
-      const contentType =
-        request.headers.get("content-type") || "";
-
-      if (!contentType.includes("application/json")) {
-        return jsonResponse(
-          {
-            success: false,
-            error: "Content-Type harus application/json"
-          },
-          400
-        );
-      }
-
+      // =======================================================
+      // READ JSON
+      // =======================================================
       const body = await request.json();
 
+      // =======================================================
+      // BASIC VALIDATION
+      // =======================================================
+      if (!body || typeof body !== "object") {
+        return jsonResponse({
+          success: false,
+          error: "Invalid request body"
+        }, 400);
+      }
+
+      // =======================================================
+      // GET PARAMETERS
+      // =======================================================
       const {
-        template,
         pdfBase64,
         ttdBase64,
         stempelBase64,
+        template,
+
         Satu,
         Dua,
         Tiga,
@@ -165,165 +71,544 @@ export default {
         Duabelas
       } = body;
 
+      // =======================================================
+      // PDF REQUIRED
+      // =======================================================
       if (!pdfBase64) {
-        return jsonResponse(
-          {
-            success: false,
-            error: "pdfBase64 tidak ditemukan"
-          },
-          400
-        );
+        return jsonResponse({
+          success: false,
+          error: "pdfBase64 is required"
+        }, 400);
       }
 
-      const data = {
-        Satu,
-        Dua,
-        Tiga,
-        Empat,
-        Lima,
-        Enam,
-        Tujuh,
-        Delapan,
-        Sembilan,
-        Sepuluh,
-        Sebelas,
-        Duabelas
+      // =======================================================
+      // DETERMINE TEMPLATE
+      // =======================================================
+      const selectedTemplate =
+        String(template || "Reguler").trim().toLowerCase();
+
+      const isPrekursor =
+        selectedTemplate === "prekursor";
+
+      // =======================================================
+      // DATA OBJECT
+      // =======================================================
+      const values = {
+        Satu: Satu ?? "",
+        Dua: Dua ?? "",
+        Tiga: Tiga ?? "",
+        Empat: Empat ?? "",
+        Lima: Lima ?? "",
+        Enam: Enam ?? "",
+        Tujuh: Tujuh ?? "",
+        Delapan: Delapan ?? "",
+        Sembilan: Sembilan ?? "",
+        Sepuluh: Sepuluh ?? "",
+        Sebelas: Sebelas ?? "",
+        Duabelas: Duabelas ?? ""
       };
 
-      const templateHtml = await getTemplate(template);
+      // =======================================================
+      // PREKURSOR LOOKUP
+      // =======================================================
+      let prekursorResult = null;
 
-      let html = replacePlaceholders(
-        templateHtml,
-        data
+      if (isPrekursor) {
+
+        try {
+
+          const csvResponse = await fetch(MASTER_PREKURSOR_URL);
+
+          if (!csvResponse.ok) {
+            throw new Error(
+              `Failed to load master_prekursor.csv (${csvResponse.status})`
+            );
+          }
+
+          const csvText = await csvResponse.text();
+
+          prekursorResult = parsePrekursorCSV(csvText);
+
+        } catch (lookupError) {
+
+          return jsonResponse({
+            success: false,
+            error: "Prekursor lookup failed",
+            detail: lookupError.message
+          }, 500);
+        }
+      }
+
+      // =======================================================
+      // DECODE PDF
+      // =======================================================
+      const pdfBytes = base64ToUint8Array(pdfBase64);
+
+      // =======================================================
+      // LOAD PDF
+      // =======================================================
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+
+      // =======================================================
+      // EMBED FONT
+      // =======================================================
+      const font = await pdfDoc.embedFont(
+        StandardFonts.Helvetica
       );
 
-      /*
-       * TTD + STEMPEL
-       *
-       * Untuk tahap awal kita hanya menyisipkan
-       * gambar jika template mempunyai placeholder:
-       *
-       * {{TTD_STEMPEL}}
-       */
+      // =======================================================
+      // PROCESS ALL PAGES
+      // =======================================================
+      const pages = pdfDoc.getPages();
 
+      for (const page of pages) {
+
+        processPage(
+          page,
+          values,
+          font
+        );
+
+      }
+
+      // =======================================================
+      // TTD + STEMPEL
+      // =======================================================
       if (ttdBase64 || stempelBase64) {
-        const ttd = cleanBase64(ttdBase64);
-        const stempel = cleanBase64(stempelBase64);
 
-        let imageHtml = "";
-
-        if (ttd) {
-          imageHtml += `
-            <img
-              src="data:image/png;base64,${ttd}"
-              style="
-                max-width:170px;
-                max-height:100px;
-                display:block;
-              "
-            />
-          `;
-        }
-
-        if (stempel) {
-          imageHtml += `
-            <img
-              src="data:image/png;base64,${stempel}"
-              style="
-                max-width:170px;
-                max-height:100px;
-                display:block;
-                margin-top:-25px;
-              "
-            />
-          `;
-        }
-
-        html = html.replaceAll(
-          "{{TTD_STEMPEL}}",
-          `
-          <div
-            style="
-              position:relative;
-              width:180px;
-              height:120px;
-            "
-          >
-            ${imageHtml}
-          </div>
-          `
+        await applySignatureAndStamp(
+          pdfDoc,
+          ttdBase64,
+          stempelBase64
         );
+
       }
 
-      /*
-       * Browser Run
-       */
+      // =======================================================
+      // SAVE PDF
+      // =======================================================
+      const outputPdf = await pdfDoc.save();
 
-      if (!env.BROWSER) {
-        return jsonResponse(
-          {
-            success: false,
-            error: "Binding BROWSER belum tersedia"
-          },
-          500
-        );
-      }
+      // =======================================================
+      // RETURN BASE64
+      // =======================================================
+      return jsonResponse({
+        success: true,
 
-      const browser =
-        await puppeteer.launch(env.BROWSER);
+        template: isPrekursor
+          ? "Prekursor"
+          : "Reguler",
 
-      try {
-        const page = await browser.newPage();
+        pageCount: pages.length,
 
-        await page.setContent(html, {
-          waitUntil: "networkidle0"
-        });
+        prekursorLookup:
+          isPrekursor
+            ? prekursorResult?.length ?? 0
+            : 0,
 
-        await page.setViewport({
-          width: 794,
-          height: 1123,
-          deviceScaleFactor: 1
-        });
-
-        const pdf = await page.pdf({
-          format: "A4",
-          printBackground: true,
-          preferCSSPageSize: true,
-          margin: {
-            top: "0",
-            right: "0",
-            bottom: "0",
-            left: "0"
-          }
-        });
-
-        const base64Pdf =
-          uint8ArrayToBase64(pdf);
-
-        return jsonResponse({
-          success: true,
-          template:
-            template || "Reguler",
-          pdfBase64: base64Pdf,
-          pdfLength: base64Pdf.length
-        });
-      } finally {
-        await browser.close();
-      }
+        pdfBase64: uint8ArrayToBase64(outputPdf)
+      });
 
     } catch (error) {
-      return jsonResponse(
-        {
-          success: false,
-          error: error?.message || String(error)
-        },
-        500
-      );
+
+      return jsonResponse({
+        success: false,
+        error: error?.message || String(error),
+        stack: error?.stack || null
+      }, 500);
     }
   }
 };
 
+
+// =============================================================
+// PROCESS PDF PAGE
+// =============================================================
+
+function processPage(page, values, font) {
+
+  const pageWidth = page.getWidth();
+  const pageHeight = page.getHeight();
+
+  /*
+   * TEMPORARY POSITION MAP
+   *
+   * Nanti kita sesuaikan dengan koordinat template PDF
+   * Reguler.pdf dan Prekursor.pdf.
+   *
+   * Untuk sekarang placeholder dibuat berdasarkan
+   * nama field.
+   */
+
+  const positions = {
+
+    Satu: {
+      x: 50,
+      y: pageHeight - 100
+    },
+
+    Dua: {
+      x: 50,
+      y: pageHeight - 120
+    },
+
+    Tiga: {
+      x: 50,
+      y: pageHeight - 140
+    },
+
+    Empat: {
+      x: 50,
+      y: pageHeight - 160
+    },
+
+    Lima: {
+      x: 50,
+      y: pageHeight - 180
+    },
+
+    Enam: {
+      x: 50,
+      y: pageHeight - 200
+    },
+
+    Tujuh: {
+      x: 50,
+      y: pageHeight - 220
+    },
+
+    Delapan: {
+      x: 50,
+      y: pageHeight - 240
+    },
+
+    Sembilan: {
+      x: 50,
+      y: pageHeight - 260
+    },
+
+    Sepuluh: {
+      x: 50,
+      y: pageHeight - 280
+    },
+
+    Sebelas: {
+      x: 50,
+      y: pageHeight - 300
+    },
+
+    Duabelas: {
+      x: 50,
+      y: pageHeight - 320
+    }
+  };
+
+  for (const [key, position] of Object.entries(positions)) {
+
+    const value = values[key];
+
+    if (
+      value === null ||
+      value === undefined ||
+      String(value).trim() === ""
+    ) {
+      continue;
+    }
+
+    page.drawText(
+      String(value),
+      {
+        x: position.x,
+        y: position.y,
+        size: 9,
+        font,
+        color: rgb(0, 0, 0)
+      }
+    );
+  }
+}
+
+
+// =============================================================
+// TTD + STEMPEL
+// =============================================================
+
+async function applySignatureAndStamp(
+  pdfDoc,
+  ttdBase64,
+  stempelBase64
+) {
+
+  let ttdImage = null;
+  let stempelImage = null;
+
+  if (ttdBase64) {
+    ttdImage = await embedImage(
+      pdfDoc,
+      ttdBase64
+    );
+  }
+
+  if (stempelBase64) {
+    stempelImage = await embedImage(
+      pdfDoc,
+      stempelBase64
+    );
+  }
+
+  const pages = pdfDoc.getPages();
+
+  for (const page of pages) {
+
+    const pageWidth = page.getWidth();
+
+    /*
+     * POSISI DASAR TTD/STEMPEL
+     *
+     * Nanti kita sesuaikan lagi dengan template.
+     */
+
+    const blockWidth = 170;
+    const blockHeight = 90;
+
+    const x =
+      pageWidth - blockWidth - 35;
+
+    const y = 55;
+
+    if (stempelImage) {
+
+      page.drawImage(
+        stempelImage,
+        {
+          x: x,
+          y: y,
+          width: 85,
+          height: 85
+        }
+      );
+
+    }
+
+    if (ttdImage) {
+
+      page.drawImage(
+        ttdImage,
+        {
+          x: x + 45,
+          y: y + 15,
+          width: 110,
+          height: 55
+        }
+      );
+
+    }
+  }
+}
+
+
+// =============================================================
+// EMBED IMAGE
+// =============================================================
+
+async function embedImage(pdfDoc, base64) {
+
+  let clean = String(base64);
+
+  // HTML IMG
+  const imgMatch =
+    clean.match(
+      /data:image\/([a-zA-Z0-9.+-]+);base64,([^"]+)/i
+    );
+
+  if (imgMatch) {
+    clean = imgMatch[2];
+
+    const format =
+      imgMatch[1].toLowerCase();
+
+    const bytes =
+      base64ToUint8Array(clean);
+
+    if (format === "jpg" || format === "jpeg") {
+      return await pdfDoc.embedJpg(bytes);
+    }
+
+    return await pdfDoc.embedPng(bytes);
+  }
+
+  // Remove data URI prefix
+  clean = clean.replace(
+    /^data:image\/[^;]+;base64,/i,
+    ""
+  );
+
+  const bytes =
+    base64ToUint8Array(clean);
+
+  // PNG signature
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4E &&
+    bytes[3] === 0x47
+  ) {
+
+    return await pdfDoc.embedPng(bytes);
+  }
+
+  // JPEG signature
+  if (
+    bytes[0] === 0xFF &&
+    bytes[1] === 0xD8
+  ) {
+
+    return await pdfDoc.embedJpg(bytes);
+  }
+
+  throw new Error(
+    "Unsupported image format. Only PNG/JPEG are supported."
+  );
+}
+
+
+// =============================================================
+// PREKURSOR CSV PARSER
+// =============================================================
+
+function parsePrekursorCSV(csv) {
+
+  const lines =
+    csv
+      .split(/\r?\n/)
+      .filter(line => line.trim() !== "");
+
+  if (lines.length < 2) {
+    return [];
+  }
+
+  const headers =
+    parseCSVLine(lines[0]);
+
+  const result = [];
+
+  for (let i = 1; i < lines.length; i++) {
+
+    const columns =
+      parseCSVLine(lines[i]);
+
+    const row = {};
+
+    headers.forEach(
+      (header, index) => {
+
+        row[header] =
+          columns[index] ?? "";
+
+      }
+    );
+
+    result.push(row);
+  }
+
+  return result;
+}
+
+
+// =============================================================
+// CSV LINE PARSER
+// =============================================================
+
+function parseCSVLine(line) {
+
+  const result = [];
+
+  let current = "";
+  let insideQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+
+    const char = line[i];
+
+    if (char === '"') {
+
+      if (
+        insideQuotes &&
+        line[i + 1] === '"'
+      ) {
+
+        current += '"';
+        i++;
+
+      } else {
+
+        insideQuotes =
+          !insideQuotes;
+      }
+
+    } else if (
+      char === "," &&
+      !insideQuotes
+    ) {
+
+      result.push(
+        current.trim()
+      );
+
+      current = "";
+
+    } else {
+
+      current += char;
+    }
+  }
+
+  result.push(
+    current.trim()
+  );
+
+  return result;
+}
+
+
+// =============================================================
+// BASE64 → UINT8ARRAY
+// =============================================================
+
+function base64ToUint8Array(base64) {
+
+  const binary =
+    atob(
+      String(base64)
+        .replace(/^data:.*?;base64,/i, "")
+        .replace(/\s/g, "")
+    );
+
+  const bytes =
+    new Uint8Array(
+      binary.length
+    );
+
+  for (
+    let i = 0;
+    i < binary.length;
+    i++
+  ) {
+
+    bytes[i] =
+      binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+
+// =============================================================
+// UINT8ARRAY → BASE64
+// =============================================================
+
 function uint8ArrayToBase64(bytes) {
+
   let binary = "";
 
   const chunkSize = 0x8000;
@@ -333,13 +618,36 @@ function uint8ArrayToBase64(bytes) {
     i < bytes.length;
     i += chunkSize
   ) {
-    const chunk = bytes.subarray(
-      i,
-      Math.min(i + chunkSize, bytes.length)
-    );
 
-    binary += String.fromCharCode(...chunk);
+    binary += String.fromCharCode(
+      ...bytes.subarray(
+        i,
+        Math.min(
+          i + chunkSize,
+          bytes.length
+        )
+      )
+    );
   }
 
   return btoa(binary);
+}
+
+
+// =============================================================
+// JSON RESPONSE
+// =============================================================
+
+function jsonResponse(data, status = 200) {
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "content-type":
+          "application/json; charset=UTF-8"
+      }
+    }
+  );
 }
