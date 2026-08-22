@@ -1,12 +1,12 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument } from "pdfjs-serverless";
 
-/* =========================================================
+/* ============================================================
    GITHUB
-   ========================================================= */
+   ============================================================ */
 
 const GITHUB_BASE =
-  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";;
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
 const REGULER_URL =
   `${GITHUB_BASE}/Reguler.pdf`;
@@ -18,9 +18,9 @@ const MASTER_URL =
   `${GITHUB_BASE}/master_prekursor.csv`;
 
 
-/* =========================================================
-   WORKER
-   ========================================================= */
+/* ============================================================
+   CLOUDFLARE WORKER
+   ============================================================ */
 
 export default {
 
@@ -28,21 +28,26 @@ export default {
 
     try {
 
+      /* ------------------------------------------------------
+         METHOD
+         ------------------------------------------------------ */
+
       if (request.method !== "POST") {
-        return json({
+
+        return jsonResponse({
           success: false,
           message: "Method harus POST."
         }, 405);
       }
 
 
+      /* ------------------------------------------------------
+         JSON POWER AUTOMATE
+         ------------------------------------------------------ */
+
       const body =
         await request.json();
 
-
-      /* =====================================================
-         INPUT
-         ===================================================== */
 
       const template =
         String(body.template || "")
@@ -51,39 +56,32 @@ export default {
 
 
       if (!template) {
+
         throw new Error(
-          "template wajib dikirim."
+          "Parameter 'template' wajib dikirim."
         );
       }
 
 
-      const ttdBase64 =
-        body.ttdBase64 || "";
+      /* ------------------------------------------------------
+         PILIH TEMPLATE GITHUB
+         ------------------------------------------------------ */
 
-
-      const stempelBase64 =
-        body.stempelBase64 || "";
-
-
-      /* =====================================================
-         PILIH TEMPLATE
-         ===================================================== */
-
-      let templateUrl;
+      let templateURL;
 
       if (
         template === "reguler" ||
         template === "regular"
       ) {
 
-        templateUrl =
+        templateURL =
           REGULER_URL;
 
       } else if (
         template === "prekursor"
       ) {
 
-        templateUrl =
+        templateURL =
           PREKURSOR_URL;
 
       } else {
@@ -94,19 +92,19 @@ export default {
       }
 
 
-      /* =====================================================
-         DOWNLOAD TEMPLATE PDF
-         ===================================================== */
+      /* ------------------------------------------------------
+         AMBIL TEMPLATE PDF
+         ------------------------------------------------------ */
 
       const templateBytes =
-        await downloadBytes(
-          templateUrl
+        await downloadBinary(
+          templateURL
         );
 
 
-      /* =====================================================
+      /* ------------------------------------------------------
          LOAD PDF
-         ===================================================== */
+         ------------------------------------------------------ */
 
       const pdf =
         await PDFDocument.load(
@@ -114,59 +112,57 @@ export default {
         );
 
 
-      /* =====================================================
-         DATA POWER AUTOMATE
-         ===================================================== */
+      /* ======================================================
+         DATA DARI POWER AUTOMATE
+         ====================================================== */
 
       const data = {
 
         Satu:
-          body.Satu,
+          clean(body.Satu),
 
         Dua:
-          body.Dua,
+          clean(body.Dua),
 
         Tiga:
-          body.Tiga,
+          clean(body.Tiga),
 
         Empat:
-          body.Empat,
+          clean(body.Empat),
 
         Lima:
-          body.Lima,
+          clean(body.Lima),
 
         Enam:
-          body.Enam,
+          clean(body.Enam),
 
         Tujuh:
-          body.Tujuh,
+          clean(body.Tujuh),
 
         Delapan:
-          body.Delapan,
+          clean(body.Delapan),
 
         Sembilan:
-          body.Sembilan,
+          clean(body.Sembilan),
 
         Sepuluh:
-          body.Sepuluh,
+          clean(body.Sepuluh),
 
         Sebelas:
-          body.Sebelas,
+          clean(body.Sebelas),
 
         Duabelas:
-          body.Duabelas
+          clean(body.Duabelas)
       };
 
 
-      /* =====================================================
+      /* ======================================================
          PREKURSOR
-         ===================================================== */
+         ====================================================== */
 
-      if (
-        template === "prekursor"
-      ) {
+      if (template === "prekursor") {
 
-        const masterCsv =
+        const csvText =
           await downloadText(
             MASTER_URL
           );
@@ -174,43 +170,34 @@ export default {
 
         const master =
           parseCSV(
-            masterCsv
+            csvText
           );
 
 
         /*
-         * Cari semua Product SKU dari JSON
+         * Cari Product SKU dari JSON
          */
 
-        const skuList =
-          extractSKUs(
+        const sku =
+          findProductSKU(
             body
           );
 
 
-        /*
-         * Kalau hanya satu SKU,
-         * ambil satu data.
-         */
+        if (sku) {
 
-        if (skuList.length > 0) {
-
-          const sku =
-            skuList[0];
-
-
-          const found =
-            findSKU(
+          const result =
+            lookupSKU(
               master,
               sku
             );
 
 
-          if (found) {
+          if (result) {
 
             data.ZatAktif =
-              firstValue(
-                found,
+              getValue(
+                result,
                 [
                   "Zat Aktif",
                   "ZatAktif",
@@ -220,8 +207,8 @@ export default {
 
 
             data.Bentuk =
-              firstValue(
-                found,
+              getValue(
+                result,
                 [
                   "Bentuk",
                   "BENTUK"
@@ -242,41 +229,45 @@ export default {
       }
 
 
-      /* =====================================================
-         REPLACE TEXT DI PDF
-         ===================================================== */
+      /* ======================================================
+         ISI PDF
+         ====================================================== */
 
-      await replacePDFPlaceholders(
+      await replacePDFText(
         pdf,
         templateBytes,
         data
       );
 
 
-      /* =====================================================
+      /* ======================================================
          TTD + STEMPEL
-         ===================================================== */
+         ====================================================== */
 
       await addTTDAndStamp(
         pdf,
-        ttdBase64,
-        stempelBase64
+        body.ttdBase64,
+        body.stempelBase64
       );
 
 
-      /* =====================================================
+      /* ======================================================
          SAVE
-         ===================================================== */
+         ====================================================== */
 
-      const output =
+      const finalBytes =
         await pdf.save();
 
 
-      const outputBase64 =
+      const finalBase64 =
         bytesToBase64(
-          output
+          finalBytes
         );
 
+
+      /* ======================================================
+         FILE NAME
+         ====================================================== */
 
       const fileName =
         template === "prekursor"
@@ -284,7 +275,11 @@ export default {
           : "Reguler.pdf";
 
 
-      return json({
+      /* ======================================================
+         RESPONSE
+         ====================================================== */
+
+      return jsonResponse({
 
         success: true,
 
@@ -294,22 +289,24 @@ export default {
           "application/pdf",
 
         spBase64:
-          outputBase64
+          finalBase64
+
       });
 
 
     } catch (error) {
 
-      return json({
+      return jsonResponse({
 
         success: false,
 
         message:
           error?.message ||
-          "Terjadi error.",
+          "Terjadi error pada Worker.",
 
         stack:
-          error?.stack || ""
+          error?.stack ||
+          null
 
       }, 500);
     }
@@ -317,30 +314,38 @@ export default {
 };
 
 
-/* =========================================================
-   REPLACE PDF PLACEHOLDERS
-   ========================================================= */
+/* ============================================================
+   REPLACE TEXT PDF
+   ============================================================ */
 
-async function replacePDFPlaceholders(
+async function replacePDFText(
   pdf,
   originalBytes,
   data
 ) {
 
   /*
-   * pdfjs membaca PDF asli untuk mendapatkan
-   * posisi teks placeholder.
+   * PDF.js membaca text layer dari template.
    */
 
   const loadingTask =
-    pdfjsLib.getDocument({
+    getDocument({
       data:
-        originalBytes.slice()
+        new Uint8Array(
+          originalBytes
+        ),
+
+      useSystemFonts:
+        true
     });
 
 
   const sourcePdf =
     await loadingTask.promise;
+
+
+  const pages =
+    pdf.getPages();
 
 
   const font =
@@ -349,9 +354,9 @@ async function replacePDFPlaceholders(
     );
 
 
-  const pages =
-    pdf.getPages();
-
+  /*
+   * Cari placeholder satu per satu.
+   */
 
   for (
     let pageIndex = 0;
@@ -365,107 +370,84 @@ async function replacePDFPlaceholders(
       );
 
 
-    const content =
+    const textContent =
       await sourcePage.getTextContent();
 
 
-    const pdfPage =
+    const items =
+      textContent.items || [];
+
+
+    const targetPage =
       pages[pageIndex];
 
 
-    if (!pdfPage) {
+    if (!targetPage) {
       continue;
     }
 
 
-    /*
-     * Gabungkan item text agar placeholder
-     * tetap bisa ditemukan walaupun PDF
-     * memecah text menjadi beberapa item.
-     */
-
-    const items =
-      content.items || [];
-
-
     for (
-      const [placeholder, rawValue]
+      const [placeholder, value]
       of Object.entries(data)
     ) {
 
       if (
-        rawValue === undefined ||
-        rawValue === null
+        value === undefined ||
+        value === null
       ) {
         continue;
       }
 
 
-      const value =
-        String(rawValue);
-
-
-      if (value === "") {
-        continue;
-      }
+      const replacement =
+        String(value);
 
 
       /*
-       * Cari placeholder.
+       * Kalau kosong, tetap tutup placeholder.
        */
 
       const matches =
-        findTextMatches(
+        findPlaceholder(
           items,
           placeholder
         );
 
 
       for (
-        const match of matches
+        const match
+        of matches
       ) {
-
-        /*
-         * Transform PDF.js:
-         *
-         * [scaleX, skewY, skewX, scaleY, x, y]
-         */
 
         const transform =
           match.transform;
 
 
+        /*
+         * PDF.js transform:
+         *
+         * [a, b, c, d, x, y]
+         */
+
         const x =
           transform[4];
 
 
-        const pdfPageHeight =
-          pdfPage.getHeight();
+        const y =
+          transform[5];
 
-
-        /*
-         * PDF.js menggunakan origin
-         * di kiri bawah untuk text transform,
-         * sehingga y perlu disesuaikan
-         * dengan tinggi font.
-         */
 
         const fontSize =
-          Math.abs(
-            transform[3]
-          ) || 10;
+          Math.max(
+            6,
+            Math.abs(
+              transform[3]
+            ) || 10
+          );
 
 
-        const y =
-          transform[5] -
-          fontSize;
-
-
-        /*
-         * Lebar placeholder.
-         */
-
-        const placeholderWidth =
+        const oldWidth =
           Math.max(
             match.width || 0,
             placeholder.length *
@@ -474,33 +456,30 @@ async function replacePDFPlaceholders(
           );
 
 
-        const height =
-          fontSize * 1.35;
+        const boxHeight =
+          fontSize * 1.4;
 
 
         /*
          * Tutup placeholder lama.
          */
 
-        pdfPage.drawRectangle({
+        targetPage.drawRectangle({
 
           x:
-            x - 1,
+            x - 2,
 
           y:
-            y - 2,
+            y - fontSize * 0.35,
 
           width:
-            placeholderWidth + 4,
+            oldWidth + 4,
 
           height:
-            height + 4,
+            boxHeight + 4,
 
           color:
             rgb(1, 1, 1),
-
-          opacity:
-            1,
 
           borderWidth:
             0
@@ -508,18 +487,30 @@ async function replacePDFPlaceholders(
 
 
         /*
-         * Tulis data baru.
+         * Jika replacement kosong,
+         * cukup hapus placeholder.
          */
 
-        pdfPage.drawText(
-          value,
+        if (
+          replacement === ""
+        ) {
+          continue;
+        }
+
+
+        /*
+         * Tulis nilai baru.
+         */
+
+        targetPage.drawText(
+          replacement,
           {
 
             x:
               x,
 
             y:
-              y,
+              y - fontSize * 0.25,
 
             size:
               fontSize,
@@ -531,7 +522,7 @@ async function replacePDFPlaceholders(
 
             maxWidth:
               Math.max(
-                placeholderWidth + 50,
+                oldWidth + 100,
                 100
               ),
 
@@ -545,11 +536,11 @@ async function replacePDFPlaceholders(
 }
 
 
-/* =========================================================
-   FIND TEXT
-   ========================================================= */
+/* ============================================================
+   FIND PLACEHOLDER
+   ============================================================ */
 
-function findTextMatches(
+function findPlaceholder(
   items,
   target
 ) {
@@ -558,7 +549,10 @@ function findTextMatches(
 
 
   /*
-   * 1. Exact item
+   * CASE 1
+   *
+   * Placeholder utuh berada dalam satu
+   * text item.
    */
 
   for (
@@ -577,35 +571,36 @@ function findTextMatches(
     ) {
 
       result.push({
+
         transform:
           item.transform,
 
         width:
-          item.width ||
-          0,
+          item.width || 0,
 
-        str:
+        text:
           item.str
+
       });
     }
   }
 
 
   /*
-   * 2. Placeholder yang terpecah
+   * CASE 2
+   *
+   * Placeholder terpecah menjadi
+   * beberapa text item.
    *
    * Contoh:
    *
-   * "Sa"
-   * "tu"
-   *
-   * menjadi "Satu"
+   * "Sa" + "tu"
    */
 
   for (
-    let i = 0;
-    i < items.length;
-    i++
+    let start = 0;
+    start < items.length;
+    start++
   ) {
 
     let combined = "";
@@ -616,16 +611,16 @@ function findTextMatches(
 
 
     for (
-      let j = i;
-      j < Math.min(
-        i + 10,
+      let i = start;
+      i < Math.min(
+        start + 12,
         items.length
       );
-      j++
+      i++
     ) {
 
       const item =
-        items[j];
+        items[i];
 
 
       if (
@@ -657,13 +652,14 @@ function findTextMatches(
             first.transform,
 
           width:
-            calculateCombinedWidth(
+            combinedWidth(
               first,
               last
             ),
 
-          str:
+          text:
             combined
+
         });
 
 
@@ -677,29 +673,33 @@ function findTextMatches(
 }
 
 
-function calculateCombinedWidth(
+/* ============================================================
+   COMBINED WIDTH
+   ============================================================ */
+
+function combinedWidth(
   first,
   last
 ) {
 
-  const x1 =
+  const firstX =
     first.transform[4];
 
 
-  const x2 =
+  const lastX =
     last.transform[4];
 
 
   return Math.abs(
-    x2 - x1
+    lastX - firstX
   ) +
   (last.width || 0);
 }
 
 
-/* =========================================================
+/* ============================================================
    TTD + STEMPEL
-   ========================================================= */
+   ============================================================ */
 
 async function addTTDAndStamp(
   pdf,
@@ -715,9 +715,14 @@ async function addTTDAndStamp(
   }
 
 
-  let ttd = null;
-  let stamp = null;
+  let ttdImage = null;
 
+  let stampImage = null;
+
+
+  /* ----------------------------------------------------------
+     TTD
+     ---------------------------------------------------------- */
 
   if (ttdBase64) {
 
@@ -731,20 +736,24 @@ async function addTTDAndStamp(
       isJPG(bytes)
     ) {
 
-      ttd =
+      ttdImage =
         await pdf.embedJpg(
           bytes
         );
 
     } else {
 
-      ttd =
+      ttdImage =
         await pdf.embedPng(
           bytes
         );
     }
   }
 
+
+  /* ----------------------------------------------------------
+     STEMPEL
+     ---------------------------------------------------------- */
 
   if (stempelBase64) {
 
@@ -758,14 +767,14 @@ async function addTTDAndStamp(
       isJPG(bytes)
     ) {
 
-      stamp =
+      stampImage =
         await pdf.embedJpg(
           bytes
         );
 
     } else {
 
-      stamp =
+      stampImage =
         await pdf.embedPng(
           bytes
         );
@@ -773,20 +782,17 @@ async function addTTDAndStamp(
   }
 
 
+  /* ----------------------------------------------------------
+     SETIAP HALAMAN
+     ---------------------------------------------------------- */
+
   const pages =
     pdf.getPages();
 
 
-  /*
-   * Posisi TTD + stempel
-   *
-   * Ini mempertahankan konsep yang
-   * sudah kita pakai sebelumnya:
-   * satu blok di area tanda tangan.
-   */
-
   for (
-    const page of pages
+    const page
+    of pages
   ) {
 
     const {
@@ -795,10 +801,14 @@ async function addTTDAndStamp(
       page.getSize();
 
 
-    if (stamp) {
+    /*
+     * STEMPEL
+     */
+
+    if (stampImage) {
 
       page.drawImage(
-        stamp,
+        stampImage,
         {
 
           x:
@@ -815,15 +825,20 @@ async function addTTDAndStamp(
 
           opacity:
             0.85
+
         }
       );
     }
 
 
-    if (ttd) {
+    /*
+     * TTD
+     */
+
+    if (ttdImage) {
 
       page.drawImage(
-        ttd,
+        ttdImage,
         {
 
           x:
@@ -837,6 +852,7 @@ async function addTTDAndStamp(
 
           height:
             55
+
         }
       );
     }
@@ -844,44 +860,53 @@ async function addTTDAndStamp(
 }
 
 
-/* =========================================================
-   SKU
-   ========================================================= */
+/* ============================================================
+   PRODUCT SKU
+   ============================================================ */
 
-function extractSKUs(
+function findProductSKU(
   body
 ) {
 
-  const result = [];
-
+  /*
+   * Cek langsung
+   */
 
   const direct = [
+
     body["Product SKU"],
     body["ProductSKU"],
     body["SKU"],
     body["Sku"],
     body["sku"]
+
   ];
 
 
   for (
-    const value of direct
+    const value
+    of direct
   ) {
 
     if (
       value !== undefined &&
       value !== null &&
-      String(value).trim()
+      String(value).trim() !== ""
     ) {
 
-      result.push(
-        String(value).trim()
-      );
+      return String(
+        value
+      ).trim();
     }
   }
 
 
+  /*
+   * Cek Satu-Duabelas
+   */
+
   const fields = [
+
     "Satu",
     "Dua",
     "Tiga",
@@ -894,28 +919,43 @@ function extractSKUs(
     "Sepuluh",
     "Sebelas",
     "Duabelas"
+
   ];
 
 
   for (
-    const field of fields
+    const fieldName
+    of fields
   ) {
 
     const value =
-      body[field];
+      body[fieldName];
 
+
+    /*
+     * Object
+     */
 
     if (
-      typeof value === "object" &&
-      value !== null
+      value &&
+      typeof value === "object"
     ) {
 
-      addObjectSKU(
-        result,
-        value
-      );
+      const sku =
+        getObjectSKU(
+          value
+        );
+
+
+      if (sku) {
+        return sku;
+      }
     }
 
+
+    /*
+     * JSON string
+     */
 
     if (
       typeof value === "string"
@@ -924,7 +964,9 @@ function extractSKUs(
       try {
 
         const parsed =
-          JSON.parse(value);
+          JSON.parse(
+            value
+          );
 
 
         if (
@@ -932,44 +974,68 @@ function extractSKUs(
           typeof parsed === "object"
         ) {
 
-          if (Array.isArray(parsed)) {
+          if (
+            Array.isArray(parsed)
+          ) {
 
             for (
-              const row of parsed
+              const row
+              of parsed
             ) {
 
-              addObjectSKU(
-                result,
-                row
-              );
+              const sku =
+                getObjectSKU(
+                  row
+                );
+
+
+              if (sku) {
+                return sku;
+              }
             }
 
           } else {
 
-            addObjectSKU(
-              result,
-              parsed
-            );
+            const sku =
+              getObjectSKU(
+                parsed
+              );
+
+
+            if (sku) {
+              return sku;
+            }
           }
         }
 
-      } catch (_) {}
+      } catch (_) {
+
+        /*
+         * Bukan JSON.
+         */
+      }
     }
   }
 
 
-  return [
-    ...new Set(result)
-  ];
+  return "";
 }
 
 
-function addObjectSKU(
-  result,
+function getObjectSKU(
   object
 ) {
 
+  if (
+    !object ||
+    typeof object !== "object"
+  ) {
+    return "";
+  }
+
+
   const sku =
+
     object["Product SKU"] ??
     object["ProductSKU"] ??
     object["SKU"] ??
@@ -978,21 +1044,122 @@ function addObjectSKU(
 
 
   if (
-    sku !== undefined &&
-    sku !== null &&
-    String(sku).trim()
+    sku === undefined ||
+    sku === null
   ) {
 
-    result.push(
-      String(sku).trim()
-    );
+    return "";
   }
+
+
+  return String(
+    sku
+  ).trim();
 }
 
 
-/* =========================================================
-   CSV
-   ========================================================= */
+/* ============================================================
+   LOOKUP SKU
+   ============================================================ */
+
+function lookupSKU(
+  rows,
+  sku
+) {
+
+  const target =
+    normalizeSKU(
+      sku
+    );
+
+
+  return rows.find(
+    row => {
+
+      const candidates = [
+
+        row["Product SKU"],
+        row["ProductSKU"],
+        row["SKU"],
+        row["Sku"],
+        row["sku"]
+
+      ];
+
+
+      return candidates.some(
+        value =>
+          normalizeSKU(
+            value
+          ) === target
+      );
+    }
+  ) || null;
+}
+
+
+/* ============================================================
+   NORMALIZE SKU
+   ============================================================ */
+
+function normalizeSKU(
+  value
+) {
+
+  if (
+    value === undefined ||
+    value === null
+  ) {
+
+    return "";
+  }
+
+
+  return String(
+    value
+  )
+  .trim()
+  .replace(
+    /^0+/,
+    ""
+  )
+  .toUpperCase();
+}
+
+
+/* ============================================================
+   GET CSV VALUE
+   ============================================================ */
+
+function getValue(
+  object,
+  keys
+) {
+
+  for (
+    const key
+    of keys
+  ) {
+
+    if (
+      object[key] !== undefined &&
+      object[key] !== null
+    ) {
+
+      return String(
+        object[key]
+      ).trim();
+    }
+  }
+
+
+  return "";
+}
+
+
+/* ============================================================
+   CSV PARSER
+   ============================================================ */
 
 function parseCSV(
   text
@@ -1009,12 +1176,15 @@ function parseCSV(
     text
       .split(/\r?\n/)
       .filter(
-        x =>
-          x.trim() !== ""
+        line =>
+          line.trim() !== ""
       );
 
 
-  if (!lines.length) {
+  if (
+    lines.length === 0
+  ) {
+
     return [];
   }
 
@@ -1056,13 +1226,19 @@ function parseCSV(
     }
 
 
-    rows.push(row);
+    rows.push(
+      row
+    );
   }
 
 
   return rows;
 }
 
+
+/* ============================================================
+   CSV LINE
+   ============================================================ */
 
 function parseCSVLine(
   line
@@ -1081,11 +1257,13 @@ function parseCSVLine(
     i++
   ) {
 
-    const c =
+    const char =
       line[i];
 
 
-    if (c === '"') {
+    if (
+      char === '"'
+    ) {
 
       if (
         quoted &&
@@ -1102,8 +1280,9 @@ function parseCSVLine(
           !quoted;
       }
 
+
     } else if (
-      c === "," &&
+      char === "," &&
       !quoted
     ) {
 
@@ -1115,7 +1294,7 @@ function parseCSVLine(
 
     } else {
 
-      current += c;
+      current += char;
     }
   }
 
@@ -1129,87 +1308,11 @@ function parseCSVLine(
 }
 
 
-function findSKU(
-  rows,
-  sku
-) {
+/* ============================================================
+   DOWNLOAD BINARY
+   ============================================================ */
 
-  const target =
-    normalizeSKU(sku);
-
-
-  return rows.find(
-    row => {
-
-      const values = [
-
-        row["Product SKU"],
-        row["ProductSKU"],
-        row["SKU"],
-        row["Sku"],
-        row["sku"]
-
-      ];
-
-
-      return values.some(
-        value =>
-          normalizeSKU(value) === target
-      );
-    }
-  ) || null;
-}
-
-
-function normalizeSKU(
-  value
-) {
-
-  if (
-    value === undefined ||
-    value === null
-  ) {
-    return "";
-  }
-
-
-  return String(value)
-    .trim()
-    .replace(/^0+/, "")
-    .toUpperCase();
-}
-
-
-function firstValue(
-  object,
-  keys
-) {
-
-  for (
-    const key of keys
-  ) {
-
-    if (
-      object[key] !== undefined &&
-      object[key] !== null
-    ) {
-
-      return String(
-        object[key]
-      ).trim();
-    }
-  }
-
-
-  return "";
-}
-
-
-/* =========================================================
-   DOWNLOAD
-   ========================================================= */
-
-async function downloadBytes(
+async function downloadBinary(
   url
 ) {
 
@@ -1219,16 +1322,18 @@ async function downloadBytes(
       {
         headers: {
           "User-Agent":
-            "Cloudflare-PDF-Worker"
+            "guardian-pdf-worker"
         }
       }
     );
 
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
 
     throw new Error(
-      `Gagal mengambil ${url} (${response.status})`
+      `Gagal mengambil file GitHub: ${response.status} ${url}`
     );
   }
 
@@ -1238,6 +1343,10 @@ async function downloadBytes(
   );
 }
 
+
+/* ============================================================
+   DOWNLOAD TEXT
+   ============================================================ */
 
 async function downloadText(
   url
@@ -1249,45 +1358,67 @@ async function downloadText(
       {
         headers: {
           "User-Agent":
-            "Cloudflare-PDF-Worker"
+            "guardian-pdf-worker"
         }
       }
     );
 
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
 
     throw new Error(
-      `Gagal mengambil ${url} (${response.status})`
+      `Gagal mengambil CSV GitHub: ${response.status}`
     );
   }
 
 
-  return response.text();
+  return await response.text();
 }
 
 
-/* =========================================================
-   IMAGE / BASE64
-   ========================================================= */
+/* ============================================================
+   BASE64 TO BYTES
+   ============================================================ */
 
 function base64ToBytes(
   value
 ) {
 
   let text =
-    String(value || "")
-      .trim();
+    String(
+      value || ""
+    ).trim();
 
+
+  /*
+   * Support:
+   *
+   * data:image/png;base64,...
+   *
+   * atau
+   *
+   * data:image/jpeg;base64,...
+   */
 
   if (
     text.startsWith("data:")
   ) {
 
-    text =
-      text.substring(
-        text.indexOf(",") + 1
-      );
+    const comma =
+      text.indexOf(",");
+
+
+    if (
+      comma !== -1
+    ) {
+
+      text =
+        text.substring(
+          comma + 1
+        );
+    }
   }
 
 
@@ -1299,7 +1430,9 @@ function base64ToBytes(
 
 
   const binary =
-    atob(text);
+    atob(
+      text
+    );
 
 
   const bytes =
@@ -1323,6 +1456,49 @@ function base64ToBytes(
 }
 
 
+/* ============================================================
+   BYTES TO BASE64
+   ============================================================ */
+
+function bytesToBase64(
+  bytes
+) {
+
+  let binary = "";
+
+  const chunkSize =
+    0x8000;
+
+
+  for (
+    let i = 0;
+    i < bytes.length;
+    i += chunkSize
+  ) {
+
+    binary +=
+      String.fromCharCode(
+        ...bytes.subarray(
+          i,
+          Math.min(
+            i + chunkSize,
+            bytes.length
+          )
+        )
+      );
+  }
+
+
+  return btoa(
+    binary
+  );
+}
+
+
+/* ============================================================
+   JPG DETECTION
+   ============================================================ */
+
 function isJPG(
   bytes
 ) {
@@ -1335,44 +1511,34 @@ function isJPG(
 }
 
 
-function bytesToBase64(
-  bytes
+/* ============================================================
+   CLEAN
+   ============================================================ */
+
+function clean(
+  value
 ) {
 
-  let binary = "";
-
-  const chunk =
-    0x8000;
-
-
-  for (
-    let i = 0;
-    i < bytes.length;
-    i += chunk
+  if (
+    value === undefined ||
+    value === null
   ) {
 
-    binary +=
-      String.fromCharCode(
-        ...bytes.subarray(
-          i,
-          Math.min(
-            i + chunk,
-            bytes.length
-          )
-        )
-      );
+    return "";
   }
 
 
-  return btoa(binary);
+  return String(
+    value
+  ).trim();
 }
 
 
-/* =========================================================
-   JSON RESPONSE
-   ========================================================= */
+/* ============================================================
+   RESPONSE
+   ============================================================ */
 
-function json(
+function jsonResponse(
   data,
   status = 200
 ) {
