@@ -1,430 +1,467 @@
-import puppeteer from "@cloudflare/puppeteer";
+const GITHUB_BASE =
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
-const REGULER_HTML_URL =
-  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.html";
+const TEMPLATE = {
+  reguler: `${GITHUB_BASE}/Reguler.html`,
+  prekursor: `${GITHUB_BASE}/Prekursor.html`
+};
 
 export default {
   async fetch(request, env) {
 
-    // ================================
-    // HEALTH CHECK
-    // ================================
-
-    if (request.method === "GET") {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: "SP GUARDIAN WORKER OK",
-          version: "REGULER-ONLY"
-        }),
-        {
-          status: 200,
-          headers: {
-            "content-type": "application/json"
-          }
-        }
-      );
-    }
-
-    // ================================
-    // ONLY POST
-    // ================================
-
-    if (request.method !== "POST") {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Method not allowed"
-        }),
-        {
-          status: 405,
-          headers: {
-            "content-type": "application/json"
-          }
-        }
-      );
-    }
-
     try {
 
-      // ================================
-      // READ JSON
-      // ================================
+      if (request.method !== "POST") {
+        return response({
+          success: false,
+          message: "Gunakan method POST."
+        }, 405);
+      }
 
       const body = await request.json();
 
-      // ================================
-      // VALUES
-      // ================================
+      // =====================================================
+      // TEMPLATE
+      // =====================================================
 
-      const values = {
-        Satu: body.Satu ?? "",
-        Dua: body.Dua ?? "",
-        Tiga: body.Tiga ?? "",
-        Empat: body.Empat ?? "",
-        Lima: body.Lima ?? "",
-        Enam: body.Enam ?? "",
-        Tujuh: body.Tujuh ?? "",
-        Delapan: body.Delapan ?? "",
-        Sembilan: body.Sembilan ?? "",
-        Sepuluh: body.Sepuluh ?? "",
-        Sebelas: body.Sebelas ?? "",
-        Duabelas: body.Duabelas ?? ""
-      };
+      const templateName =
+        String(body.template || "Reguler")
+          .trim()
+          .toLowerCase();
 
-      const ttdBase64 =
-        body.ttdBase64 || "";
-
-      const stempelBase64 =
-        body.stempelBase64 || "";
-
-      // ================================
-      // DOWNLOAD HTML
-      // ================================
-
-      const response =
-        await fetch(REGULER_HTML_URL);
-
-      if (!response.ok) {
+      if (!TEMPLATE[templateName]) {
         throw new Error(
-          "Reguler.html gagal diambil. HTTP " +
-          response.status
+          "Template harus Reguler atau Prekursor."
+        );
+      }
+
+      // =====================================================
+      // AMBIL TEMPLATE HTML DARI GITHUB
+      // =====================================================
+
+      const templateResponse =
+        await fetch(
+          TEMPLATE[templateName]
+        );
+
+      if (!templateResponse.ok) {
+        throw new Error(
+          `Template GitHub gagal diambil. HTTP ${templateResponse.status}`
         );
       }
 
       let html =
-        await response.text();
+        await templateResponse.text();
 
-      // ================================
-      // REPLACE PLACEHOLDERS
-      // ================================
+      // =====================================================
+      // REPLACE SATU - DUABELAS
+      // =====================================================
+
+      const fields = [
+        "Satu",
+        "Dua",
+        "Tiga",
+        "Empat",
+        "Lima",
+        "Enam",
+        "Tujuh",
+        "Delapan",
+        "Sembilan",
+        "Sepuluh",
+        "Sebelas",
+        "Duabelas"
+      ];
+
+      for (const field of fields) {
+
+        const value =
+          body[field] ??
+          "";
+
+        html =
+          html.split(
+            `{{${field}}}`
+          ).join(
+            escapeHtml(
+              String(value)
+            )
+          );
+      }
+
+      // =====================================================
+      // TABLE PDF
+      //
+      // Untuk test tahap pertama:
+      // Power Automate kirim TablePDF sebagai HTML.
+      // =====================================================
+
+      let tableHtml =
+        body.TablePDF || "";
+
+      if (!tableHtml) {
+
+        tableHtml = `
+          <table class="medicine-table">
+            <thead>
+              <tr>
+                <th>No</th>
+                <th>Nama Obat</th>
+                <th>Satuan</th>
+                <th>Zat Aktif</th>
+                <th>Bentuk</th>
+                <th>Jumlah</th>
+                <th>Keterangan</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr>
+                <td colspan="7">
+                  Tidak ada data tabel.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        `;
+      }
 
       html =
-        replaceValues(
-          html,
-          values
+        html.split(
+          "{{TablePDF}}"
+        ).join(
+          tableHtml
         );
 
-      // ================================
-      // ADD TTD + STEMPEL
-      // ================================
+      // =====================================================
+      // TTD + STEMPEL
+      // =====================================================
+
+      const ttd =
+        normalizeImage(
+          body.ttdBase64
+        );
+
+      const stamp =
+        normalizeImage(
+          body.stempelBase64
+        );
+
+      let signatureHtml = "";
+
+      if (ttd || stamp) {
+
+        signatureHtml = `
+          <div class="signature-container">
+
+            ${
+              stamp
+                ? `
+                  <img
+                    src="${stamp}"
+                    class="stamp"
+                  >
+                `
+                : ""
+            }
+
+            ${
+              ttd
+                ? `
+                  <img
+                    src="${ttd}"
+                    class="signature"
+                  >
+                `
+                : ""
+            }
+
+          </div>
+        `;
+      }
 
       html =
-        addSignature(
-          html,
-          ttdBase64,
-          stempelBase64
+        html.split(
+          "{{TTD&Stemp}}"
+        ).join(
+          signatureHtml
         );
 
-      // ================================
-      // CHECK BROWSER
-      // ================================
+      // =====================================================
+      // HILANGKAN PLACEHOLDER YANG MASIH TERSISA
+      // =====================================================
+
+      html =
+        html.replace(
+          /\{\{[^{}]+\}\}/g,
+          ""
+        );
+
+      // =====================================================
+      // TAMBAHKAN CSS PDF
+      // =====================================================
+
+      html =
+        addPdfCss(
+          html
+        );
+
+      // =====================================================
+      // HTML → PDF
+      // =====================================================
 
       if (!env.BROWSER) {
         throw new Error(
-          "BROWSER binding tidak ditemukan."
+          "Binding BROWSER belum tersedia di Cloudflare Worker."
         );
       }
 
-      // ================================
-      // START BROWSER
-      // ================================
-
-      const browser =
-        await puppeteer.launch(
-          env.BROWSER
-        );
-
-      try {
-
-        const page =
-          await browser.newPage();
-
-        // ==============================
-        // A4
-        // ==============================
-
-        await page.setViewport({
-          width: 794,
-          height: 1123,
-          deviceScaleFactor: 1
-        });
-
-        // ==============================
-        // HTML
-        // ==============================
-
-        await page.setContent(
-          html,
+      const pdf =
+        await env.BROWSER.quickAction(
+          "pdf",
           {
-            waitUntil: "networkidle0"
-          }
-        );
+            html: html,
 
-        // ==============================
-        // PDF
-        // ==============================
+            pdfOptions: {
+              format: "a4",
 
-        const pdf =
-          await page.pdf({
-            format: "A4",
-            printBackground: true,
-            margin: {
-              top: "0mm",
-              right: "0mm",
-              bottom: "0mm",
-              left: "0mm"
-            },
-            preferCSSPageSize: true
-          });
+              printBackground: true,
 
-        await browser.close();
+              preferCSSPageSize: true,
 
-        // ==============================
-        // RESPONSE
-        // ==============================
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            template: "Reguler",
-            pdfBase64:
-              toBase64(pdf)
-          }),
-          {
-            status: 200,
-            headers: {
-              "content-type":
-                "application/json"
+              margin: {
+                top: "0",
+                right: "0",
+                bottom: "0",
+                left: "0"
+              }
             }
           }
         );
 
-      } catch (error) {
+      if (!pdf.ok) {
 
-        try {
-          await browser.close();
-        } catch (_) {}
+        const error =
+          await pdf.text();
 
-        throw error;
+        throw new Error(
+          `HTML → PDF gagal: ${error}`
+        );
       }
+
+      // =====================================================
+      // PDF BINARY → BASE64
+      // =====================================================
+
+      const pdfBytes =
+        new Uint8Array(
+          await pdf.arrayBuffer()
+        );
+
+      const spBase64 =
+        bytesToBase64(
+          pdfBytes
+        );
+
+      // =====================================================
+      // RESPONSE
+      // =====================================================
+
+      return response({
+
+        success: true,
+
+        message:
+          "HTML berhasil dikonversi menjadi PDF.",
+
+        template:
+          templateName === "prekursor"
+            ? "Prekursor"
+            : "Reguler",
+
+        spBase64:
+          spBase64
+
+      });
 
     } catch (error) {
 
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error:
-            error?.message ||
-            String(error)
-        }),
-        {
-          status: 500,
-          headers: {
-            "content-type":
-              "application/json"
-          }
-        }
-      );
+      return response({
+
+        success: false,
+
+        message:
+          error?.message ||
+          "Terjadi error."
+
+      }, 500);
     }
   }
 };
 
 
-// ========================================
-// REPLACE VALUES
-// ========================================
+// =========================================================
+// TAMBAHKAN CSS PDF
+// =========================================================
 
-function replaceValues(
-  html,
-  values
-) {
+function addPdfCss(html) {
 
-  let result =
-    String(html);
+  const css = `
+    <style>
 
-  for (
-    const key in values
-  ) {
+      @page {
+        size: A4 portrait;
+        margin: 0;
+      }
 
-    const value =
-      escapeHtml(
-        String(values[key] ?? "")
-      );
+      html,
+      body {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0;
+        padding: 0;
+      }
 
-    // {{Satu}}
-    result =
-      result.replace(
-        new RegExp(
-          "\\{\\{" +
-          escapeRegExp(key) +
-          "\\}\\}",
-          "gi"
-        ),
-        value
-      );
+      .a4-container {
+        width: 210mm;
+        min-height: 297mm;
+        box-sizing: border-box;
+        page-break-after: always;
+      }
 
-    // [[Satu]]
-    result =
-      result.replace(
-        new RegExp(
-          "\\[\\[" +
-          escapeRegExp(key) +
-          "\\]\\]",
-          "gi"
-        ),
-        value
-      );
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
 
-    // ${Satu}
-    result =
-      result.replace(
-        new RegExp(
-          "\\$\\{" +
-          escapeRegExp(key) +
-          "\\}",
-          "gi"
-        ),
-        value
-      );
-  }
+      table th,
+      table td {
+        border: 1px solid #000;
+        padding: 4px;
+        vertical-align: top;
+      }
 
-  return result;
+      .medicine-table {
+        width: 100%;
+        table-layout: fixed;
+        font-size: 9px;
+      }
+
+      .medicine-table th:nth-child(1) {
+        width: 6%;
+      }
+
+      .medicine-table th:nth-child(2) {
+        width: 25%;
+      }
+
+      .medicine-table th:nth-child(3) {
+        width: 10%;
+      }
+
+      .medicine-table th:nth-child(4) {
+        width: 19%;
+      }
+
+      .medicine-table th:nth-child(5) {
+        width: 12%;
+      }
+
+      .medicine-table th:nth-child(6) {
+        width: 8%;
+      }
+
+      .medicine-table th:nth-child(7) {
+        width: 20%;
+      }
+
+      .signature-container {
+        position: relative;
+        width: 150px;
+        height: 100px;
+      }
+
+      .signature-container .stamp {
+        position: absolute;
+        left: 40px;
+        top: 15px;
+        width: 85px;
+        height: 85px;
+        object-fit: contain;
+        z-index: 1;
+      }
+
+      .signature-container .signature {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 105px;
+        height: 60px;
+        object-fit: contain;
+        z-index: 2;
+      }
+
+    </style>
+  `;
+
+  return html.replace(
+    "</head>",
+    `${css}</head>`
+  );
 }
 
 
-// ========================================
-// TTD + STEMPEL
-// ========================================
+// =========================================================
+// IMAGE NORMALIZER
+// =========================================================
 
-function addSignature(
-  html,
-  ttdBase64,
-  stempelBase64
-) {
-
-  const ttd =
-    normalizeImage(
-      ttdBase64
-    );
-
-  const stempel =
-    normalizeImage(
-      stempelBase64
-    );
-
-  if (!ttd && !stempel) {
-    return html;
-  }
-
-  const block = `
-
-<style>
-
-.sp-signature {
-  position: absolute;
-  right: 25mm;
-  bottom: 22mm;
-  width: 55mm;
-  height: 35mm;
-  z-index: 9999;
-}
-
-.sp-stempel {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 25mm;
-  height: 25mm;
-  object-fit: contain;
-}
-
-.sp-ttd {
-  position: absolute;
-  left: 12mm;
-  bottom: 8mm;
-  width: 40mm;
-  height: 22mm;
-  object-fit: contain;
-}
-
-</style>
-
-<div class="sp-signature">
-
-${
-  stempel
-    ? '<img class="sp-stempel" src="' +
-      stempel +
-      '">'
-    : ''
-}
-
-${
-  ttd
-    ? '<img class="sp-ttd" src="' +
-      ttd +
-      '">'
-    : ''
-}
-
-</div>
-
-`;
-
-  if (
-    html.includes("</body>")
-  ) {
-    return html.replace(
-      "</body>",
-      block +
-      "</body>"
-    );
-  }
-
-  return html + block;
-}
-
-
-// ========================================
-// NORMALIZE IMAGE
-// ========================================
-
-function normalizeImage(
-  value
-) {
+function normalizeImage(value) {
 
   if (!value) {
     return "";
   }
 
-  const text =
+  let image =
     String(value).trim();
 
+  // Sudah data:image
   if (
-    text.startsWith(
+    image.startsWith(
       "data:image/"
     )
   ) {
-    return text;
+    return image;
   }
 
-  return (
-    "data:image/png;base64," +
-    text
-  );
+  // Kalau format <img src="...">
+  const match =
+    image.match(
+      /<img[^>]+src=["']([^"']+)["']/i
+    );
+
+  if (match) {
+    return match[1];
+  }
+
+  // Base64 mentah
+  image =
+    image.replace(
+      /\s/g,
+      ""
+    );
+
+  return `data:image/png;base64,${image}`;
 }
 
 
-// ========================================
+// =========================================================
 // HTML ESCAPE
-// ========================================
+// =========================================================
 
-function escapeHtml(
-  value
-) {
+function escapeHtml(value) {
 
-  return String(value)
+  return String(
+    value ?? ""
+  )
     .replace(
       /&/g,
       "&amp;"
@@ -448,39 +485,21 @@ function escapeHtml(
 }
 
 
-// ========================================
-// REGEX ESCAPE
-// ========================================
+// =========================================================
+// BYTES → BASE64
+// =========================================================
 
-function escapeRegExp(
-  value
-) {
-
-  return String(value)
-    .replace(
-      /[.*+?^${}()|[\]\\]/g,
-      "\\$&"
-    );
-}
-
-
-// ========================================
-// UINT8ARRAY TO BASE64
-// ========================================
-
-function toBase64(
-  bytes
-) {
+function bytesToBase64(bytes) {
 
   let binary = "";
 
-  const chunkSize =
+  const chunk =
     0x8000;
 
   for (
     let i = 0;
     i < bytes.length;
-    i += chunkSize
+    i += chunk
   ) {
 
     binary +=
@@ -488,12 +507,39 @@ function toBase64(
         ...bytes.subarray(
           i,
           Math.min(
-            i + chunkSize,
+            i + chunk,
             bytes.length
           )
         )
       );
   }
 
-  return btoa(binary);
+  return btoa(
+    binary
+  );
+}
+
+
+// =========================================================
+// JSON RESPONSE
+// =========================================================
+
+function response(
+  data,
+  status = 200
+) {
+
+  return new Response(
+    JSON.stringify(
+      data
+    ),
+    {
+      status,
+
+      headers: {
+        "Content-Type":
+          "application/json; charset=utf-8"
+      }
+    }
+  );
 }
