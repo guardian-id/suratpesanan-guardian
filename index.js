@@ -6,7 +6,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
    ========================================================= */
 
 const GITHUB_BASE =
-  "https://raw.githubusercontent.com/USERNAME/REPOSITORY/main";
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";;
 
 const REGULER_URL =
   `${GITHUB_BASE}/Reguler.pdf`;
