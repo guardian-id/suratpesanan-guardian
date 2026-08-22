@@ -24,7 +24,7 @@ export default {
         success: true,
         message: "SP GUARDIAN WORKER OK",
         worker: "suratpesanan-guardian",
-        version: "FINAL-HTML-2-TEMPLATE"
+        version: "HTML-TEMPLATE-FINAL"
       });
     }
 
@@ -64,29 +64,32 @@ export default {
       // GET PARAMETERS
       // =======================================================
 
-      const {
-        template,
+      const template =
+        body.template;
 
-        pdfBase64,
-        ttdBase64,
-        stempelBase64,
+      const ttdBase64 =
+        body.ttdBase64;
 
-        Satu,
-        Dua,
-        Tiga,
-        Empat,
-        Lima,
-        Enam,
-        Tujuh,
-        Delapan,
-        Sembilan,
-        Sepuluh,
-        Sebelas,
-        Duabelas
-      } = body;
+      const stempelBase64 =
+        body.stempelBase64;
+
+      const values = {
+        Satu: safeValue(body.Satu),
+        Dua: safeValue(body.Dua),
+        Tiga: safeValue(body.Tiga),
+        Empat: safeValue(body.Empat),
+        Lima: safeValue(body.Lima),
+        Enam: safeValue(body.Enam),
+        Tujuh: safeValue(body.Tujuh),
+        Delapan: safeValue(body.Delapan),
+        Sembilan: safeValue(body.Sembilan),
+        Sepuluh: safeValue(body.Sepuluh),
+        Sebelas: safeValue(body.Sebelas),
+        Duabelas: safeValue(body.Duabelas)
+      };
 
       // =======================================================
-      // TEMPLATE
+      // SELECT TEMPLATE
       // =======================================================
 
       const templateName =
@@ -108,26 +111,7 @@ export default {
           : REGULER_TEMPLATE_URL;
 
       // =======================================================
-      // DATA
-      // =======================================================
-
-      const values = {
-        Satu: safeValue(Satu),
-        Dua: safeValue(Dua),
-        Tiga: safeValue(Tiga),
-        Empat: safeValue(Empat),
-        Lima: safeValue(Lima),
-        Enam: safeValue(Enam),
-        Tujuh: safeValue(Tujuh),
-        Delapan: safeValue(Delapan),
-        Sembilan: safeValue(Sembilan),
-        Sepuluh: safeValue(Sepuluh),
-        Sebelas: safeValue(Sebelas),
-        Duabelas: safeValue(Duabelas)
-      };
-
-      // =======================================================
-      // LOAD HTML TEMPLATE
+      // LOAD HTML FROM GITHUB
       // =======================================================
 
       const templateResponse =
@@ -135,7 +119,10 @@ export default {
 
       if (!templateResponse.ok) {
         throw new Error(
-          `Template ${selectedTemplate}.html gagal diambil dari GitHub. HTTP ${templateResponse.status}`
+          "Gagal mengambil template " +
+          selectedTemplate +
+          ".html dari GitHub. HTTP " +
+          templateResponse.status
         );
       }
 
@@ -143,7 +130,7 @@ export default {
         await templateResponse.text();
 
       // =======================================================
-      // REPLACE PLACEHOLDER
+      // REPLACE DATA
       // =======================================================
 
       html =
@@ -153,52 +140,42 @@ export default {
         );
 
       // =======================================================
-      // PREKURSOR LOOKUP
+      // PREKURSOR MASTER LOOKUP
       // =======================================================
 
-      let prekursorLookup = [];
+      let prekursorData = [];
 
       if (isPrekursor) {
 
-        try {
+        const csvResponse =
+          await fetch(
+            MASTER_PREKURSOR_URL
+          );
 
-          const csvResponse =
-            await fetch(MASTER_PREKURSOR_URL);
-
-          if (!csvResponse.ok) {
-            throw new Error(
-              `master_prekursor.csv HTTP ${csvResponse.status}`
-            );
-          }
-
-          const csvText =
-            await csvResponse.text();
-
-          prekursorLookup =
-            parsePrekursorCSV(csvText);
-
-          // ---------------------------------------------------
-          // OPTIONAL:
-          // Data lookup tersedia di HTML melalui JS variable.
-          // ---------------------------------------------------
-
-          html =
-            injectPrekursorData(
-              html,
-              prekursorLookup
-            );
-
-        } catch (lookupError) {
-
-          return jsonResponse(
-            {
-              success: false,
-              error: "Prekursor lookup failed",
-              detail: lookupError.message
-            },
-            500
+        if (!csvResponse.ok) {
+          throw new Error(
+            "Gagal mengambil master_prekursor.csv. HTTP " +
+            csvResponse.status
           );
         }
+
+        const csvText =
+          await csvResponse.text();
+
+        prekursorData =
+          parsePrekursorCSV(
+            csvText
+          );
+
+        // -----------------------------------------------------
+        // Masukkan master data ke HTML sebagai variable JS
+        // -----------------------------------------------------
+
+        html =
+          injectPrekursorData(
+            html,
+            prekursorData
+          );
       }
 
       // =======================================================
@@ -213,14 +190,18 @@ export default {
         );
 
       // =======================================================
-      // CLOUDFLARE BROWSER
+      // CHECK BROWSER BINDING
       // =======================================================
 
       if (!env.BROWSER) {
         throw new Error(
-          "BROWSER binding tidak ditemukan di Cloudflare Worker."
+          "Cloudflare Browser binding BROWSER tidak ditemukan."
         );
       }
+
+      // =======================================================
+      // LAUNCH BROWSER
+      // =======================================================
 
       const browser =
         await puppeteer.launch(
@@ -232,9 +213,9 @@ export default {
         const page =
           await browser.newPage();
 
-        // -----------------------------------------------------
-        // A4
-        // -----------------------------------------------------
+        // =====================================================
+        // VIEWPORT
+        // =====================================================
 
         await page.setViewport({
           width: 794,
@@ -242,9 +223,9 @@ export default {
           deviceScaleFactor: 1
         });
 
-        // -----------------------------------------------------
+        // =====================================================
         // LOAD HTML
-        // -----------------------------------------------------
+        // =====================================================
 
         await page.setContent(
           html,
@@ -253,14 +234,18 @@ export default {
           }
         );
 
-        // -----------------------------------------------------
-        // PRINT PDF
-        // -----------------------------------------------------
+        // =====================================================
+        // PRINT A4
+        // =====================================================
 
         const pdfBytes =
           await page.pdf({
             format: "A4",
+
             printBackground: true,
+
+            preferCSSPageSize: true,
+
             margin: {
               top: "0mm",
               right: "0mm",
@@ -269,25 +254,31 @@ export default {
             }
           });
 
-        // -----------------------------------------------------
-        // RETURN BASE64
-        // -----------------------------------------------------
+        // =====================================================
+        // RESPONSE
+        // =====================================================
 
         return jsonResponse({
           success: true,
 
+          worker:
+            "suratpesanan-guardian",
+
           template:
             selectedTemplate,
 
-          templateURL,
+          templateURL:
+            templateURL,
 
           prekursorLookup:
             isPrekursor
-              ? prekursorLookup.length
+              ? prekursorData.length
               : 0,
 
           pdfBase64:
-            uint8ArrayToBase64(pdfBytes)
+            uint8ArrayToBase64(
+              pdfBytes
+            )
         });
 
       } finally {
@@ -301,6 +292,7 @@ export default {
       return jsonResponse(
         {
           success: false,
+
           error:
             error?.message ||
             String(error),
@@ -342,57 +334,58 @@ function replaceTemplateValues(
   values
 ) {
 
-  let result = html;
+  let result =
+    String(html);
 
   for (
     const [key, value]
     of Object.entries(values)
   ) {
 
-    // ---------------------------------------------------------
-    // Mendukung:
-    //
+    // =========================================================
     // {{Satu}}
-    // {{ Dua }}
-    // Satu
+    // =========================================================
+
+    result =
+      result.replace(
+        new RegExp(
+          "\\{\\{\\s*" +
+          escapeRegExp(key) +
+          "\\s*\\}\\}",
+          "gi"
+        ),
+        escapeHtml(value)
+      );
+
+    // =========================================================
     // [[Satu]]
-    // ---------------------------------------------------------
+    // =========================================================
 
-    const patterns = [
+    result =
+      result.replace(
+        new RegExp(
+          "\\[\\[\\s*" +
+          escapeRegExp(key) +
+          "\\s*\\]\\]",
+          "gi"
+        ),
+        escapeHtml(value)
+      );
 
-      new RegExp(
-        "\\{\\{\\s*" +
-        escapeRegExp(key) +
-        "\\s*\\}\\}",
-        "gi"
-      ),
+    // =========================================================
+    // ${Satu}
+    // =========================================================
 
-      new RegExp(
-        "\\[\\[\\s*" +
-        escapeRegExp(key) +
-        "\\s*\\]\\]",
-        "gi"
-      ),
-
-      new RegExp(
-        "\\b" +
-        escapeRegExp(key) +
-        "\\b",
-        "g"
-      )
-    ];
-
-    for (
-      const pattern
-      of patterns
-    ) {
-
-      result =
-        result.replace(
-          pattern,
-          escapeHtml(value)
-        );
-    }
+    result =
+      result.replace(
+        new RegExp(
+          "\\$\\{\\s*" +
+          escapeRegExp(key) +
+          "\\s*\\}",
+          "gi"
+        ),
+        escapeHtml(value)
+      );
   }
 
   return result;
@@ -408,22 +401,38 @@ function injectPrekursorData(
   data
 ) {
 
-  const json =
+  const safeJSON =
     JSON.stringify(data)
-      .replace(/</g, "\\u003c")
-      .replace(/>/g, "\\u003e")
-      .replace(/&/g, "\\u0026");
+      .replace(
+        /</g,
+        "\\u003c"
+      )
+      .replace(
+        />/g,
+        "\\u003e"
+      )
+      .replace(
+        /&/g,
+        "\\u0026"
+      );
 
   const script = `
 <script>
-window.PREKURSOR_DATA = ${json};
+window.PREKURSOR_DATA = ${safeJSON};
 </script>
 `;
 
-  return html.replace(
-    "</head>",
-    script + "</head>"
-  );
+  if (
+    html.includes("</head>")
+  ) {
+
+    return html.replace(
+      "</head>",
+      script + "</head>"
+    );
+  }
+
+  return script + html;
 }
 
 
@@ -454,32 +463,28 @@ function injectSignatureAndStamp(
       stempelBase64
     );
 
-  let signatureHTML = "";
-
-  // =========================================================
-  // BLOCK TTD + STEMPEL
-  // =========================================================
-
-  signatureHTML += `
-<div id="sp-signature-block"
-     style="
-       position:absolute;
-       right:35mm;
-       bottom:20mm;
-       width:65mm;
-       height:40mm;
-       z-index:9999;
-       pointer-events:none;
-     ">
+  let block = `
+<div
+  id="sp-signature-block"
+  style="
+    position:absolute;
+    right:30mm;
+    bottom:20mm;
+    width:70mm;
+    height:40mm;
+    z-index:99999;
+    pointer-events:none;
+  "
+>
 `;
 
-  // =========================================================
+  // ===========================================================
   // STEMPEL
-  // =========================================================
+  // ===========================================================
 
   if (stempel) {
 
-    signatureHTML += `
+    block += `
 <img
   src="${stempel}"
   style="
@@ -490,38 +495,38 @@ function injectSignatureAndStamp(
     height:32mm;
     object-fit:contain;
   "
-/>
+>
 `;
   }
 
-  // =========================================================
+  // ===========================================================
   // TTD
-  // =========================================================
+  // ===========================================================
 
   if (ttd) {
 
-    signatureHTML += `
+    block += `
 <img
   src="${ttd}"
   style="
     position:absolute;
-    left:17mm;
+    left:16mm;
     bottom:8mm;
-    width:42mm;
-    height:22mm;
+    width:45mm;
+    height:23mm;
     object-fit:contain;
   "
-/>
+>
 `;
   }
 
-  signatureHTML += `
+  block += `
 </div>
 `;
 
-  // =========================================================
-  // INSERT BEFORE BODY END
-  // =========================================================
+  // ===========================================================
+  // INSERT INTO BODY
+  // ===========================================================
 
   if (
     html.includes("</body>")
@@ -529,18 +534,16 @@ function injectSignatureAndStamp(
 
     return html.replace(
       "</body>",
-      signatureHTML + "</body>"
+      block + "</body>"
     );
-
   }
 
-  return html +
-    signatureHTML;
+  return html + block;
 }
 
 
 // =============================================================
-// NORMALIZE IMAGE BASE64
+// IMAGE BASE64
 // =============================================================
 
 function normalizeImageBase64(
@@ -554,22 +557,27 @@ function normalizeImageBase64(
   let clean =
     String(value).trim();
 
-  // ---------------------------------------------------------
-  // Kalau sudah data URI
-  // ---------------------------------------------------------
+  // ===========================================================
+  // Already data URI
+  // ===========================================================
 
   if (
     clean.startsWith(
       "data:image/"
     )
   ) {
-
     return clean;
   }
 
-  // ---------------------------------------------------------
-  // Deteksi PNG
-  // ---------------------------------------------------------
+  // ===========================================================
+  // Remove possible prefix
+  // ===========================================================
+
+  clean =
+    clean.replace(
+      /^data:image\/[^;]+;base64,/i,
+      ""
+    );
 
   try {
 
@@ -577,6 +585,10 @@ function normalizeImageBase64(
       base64ToUint8Array(
         clean
       );
+
+    // =========================================================
+    // PNG
+    // =========================================================
 
     if (
       bytes[0] === 0x89 &&
@@ -591,9 +603,9 @@ function normalizeImageBase64(
       );
     }
 
-    // -------------------------------------------------------
+    // =========================================================
     // JPEG
-    // -------------------------------------------------------
+    // =========================================================
 
     if (
       bytes[0] === 0xff &&
@@ -616,7 +628,7 @@ function normalizeImageBase64(
 
 
 // =============================================================
-// CSV PARSER
+// PREKURSOR CSV
 // =============================================================
 
 function parsePrekursorCSV(
@@ -624,7 +636,7 @@ function parsePrekursorCSV(
 ) {
 
   const lines =
-    csv
+    String(csv)
       .split(/\r?\n/)
       .filter(
         line =>
@@ -663,7 +675,6 @@ function parsePrekursorCSV(
         row[header] =
           columns[index] ??
           "";
-
       }
     );
 
@@ -712,7 +723,6 @@ function parseCSVLine(
 
         insideQuotes =
           !insideQuotes;
-
       }
 
     } else if (
@@ -741,7 +751,7 @@ function parseCSVLine(
 
 
 // =============================================================
-// BASE64
+// BASE64 -> UINT8ARRAY
 // =============================================================
 
 function base64ToUint8Array(
@@ -817,7 +827,7 @@ function uint8ArrayToBase64(
 
 
 // =============================================================
-// ESCAPE HTML
+// HTML ESCAPE
 // =============================================================
 
 function escapeHtml(
@@ -849,7 +859,7 @@ function escapeHtml(
 
 
 // =============================================================
-// ESCAPE REGEX
+// REGEX ESCAPE
 // =============================================================
 
 function escapeRegExp(
@@ -876,9 +886,10 @@ function jsonResponse(
   return new Response(
     JSON.stringify(data),
     {
-      status,
+      status: status,
+
       headers: {
-        "content-type":
+        "Content-Type":
           "application/json; charset=UTF-8"
       }
     }
