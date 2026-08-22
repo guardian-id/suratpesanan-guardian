@@ -1,53 +1,74 @@
 ```javascript
 /*
-===========================================================
-GUARDIAN SP WORKER
-===========================================================
+============================================================
+SP GUARDIAN - CLOUDFLARE WORKER
+============================================================
 
-INPUT POWER AUTOMATE:
+FLOW:
 
-{
-  "template": "Reguler",
+Power Automate
+    |
+    | pdfBase64
+    | Satu ... Duabelas
+    | ttdBase64
+    | stempelBase64
+    v
+Cloudflare Worker
+    |
+    +-- GitHub Reguler.html / Prekursor.html
+    |
+    +-- Workers AI membaca PDF
+    |
+    +-- Extract jumlah halaman
+    |
+    +-- Extract tabel PDF
+    |
+    +-- {{TablePDF}}
+    |
+    +-- {{TTD&Stemp}}
+    |
+    +-- Satu ... Duabelas
+    |
+    +-- Browser Rendering
+    |
+    v
+spBase64
+    |
+    v
+Power Automate
 
-  "pdfBase64": "...",
+============================================================
+CLOUDFLARE BINDINGS
+============================================================
 
-  "Satu": "...",
-  "Dua": "...",
-  "Tiga": "...",
-  "Empat": "...",
-  "Lima": "...",
-  "Enam": "...",
-  "Tujuh": "...",
-  "Delapan": "...",
-  "Sembilan": "...",
-  "Sepuluh": "...",
-  "Sebelas": "...",
-  "Duabelas": "...",
+AI
+BROWSER
 
-  "ttdBase64": "...",
-  "stempelBase64": "..."
-}
-
-===========================================================
-REQUIRED CLOUDFLARE BINDINGS
-
-AI       -> Workers AI
-BROWSER  -> Browser Rendering
-
-===========================================================
+============================================================
 */
+
+
+// ============================================================
+// GITHUB TEMPLATE
+// ============================================================
 
 const GITHUB_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
 const TEMPLATE_URL = {
+
   reguler:
-    `${GITHUB_BASE}/Reguler.html`,
+    GITHUB_BASE + "/Reguler.html",
 
   prekursor:
-    `${GITHUB_BASE}/Prekursor.html`
+    GITHUB_BASE + "/Prekursor.html"
+
 };
 
+
+// ============================================================
+// MAIN WORKER
+// ============================================================
 
 export default {
 
@@ -55,9 +76,9 @@ export default {
 
     try {
 
-      // ==================================================
+      // ------------------------------------------------------
       // METHOD
-      // ==================================================
+      // ------------------------------------------------------
 
       if (request.method !== "POST") {
 
@@ -66,43 +87,46 @@ export default {
           success: false,
 
           message:
-            "Method harus POST."
+            "Gunakan HTTP POST."
 
         }, 405);
+
       }
 
 
-      // ==================================================
-      // READ JSON
-      // ==================================================
-
-      const body =
-        await request.json();
-
-
-      // ==================================================
-      // CHECK BINDINGS
-      // ==================================================
+      // ------------------------------------------------------
+      // CHECK CLOUDFLARE BINDINGS
+      // ------------------------------------------------------
 
       if (!env.AI) {
 
         throw new Error(
-          "Workers AI binding 'AI' belum dipasang di Worker."
+          "Binding Workers AI 'AI' belum tersedia."
         );
+
       }
 
 
       if (!env.BROWSER) {
 
         throw new Error(
-          "Browser Rendering binding 'BROWSER' belum dipasang di Worker."
+          "Binding Browser Rendering 'BROWSER' belum tersedia."
         );
+
       }
 
 
-      // ==================================================
+      // ------------------------------------------------------
+      // READ JSON
+      // ------------------------------------------------------
+
+      const body =
+        await request.json();
+
+
+      // ------------------------------------------------------
       // TEMPLATE
-      // ==================================================
+      // ------------------------------------------------------
 
       const templateName =
         String(
@@ -114,20 +138,56 @@ export default {
 
 
       if (
-        !TEMPLATE_URL[
-          templateName
-        ]
+        templateName !== "reguler" &&
+        templateName !== "prekursor"
       ) {
 
         throw new Error(
-          "Template harus Reguler atau Prekursor."
+          "template harus Reguler atau Prekursor."
         );
+
       }
 
 
-      // ==================================================
-      // DOWNLOAD TEMPLATE GITHUB
-      // ==================================================
+      // ------------------------------------------------------
+      // PDF BASE64
+      // ------------------------------------------------------
+
+      if (!body.pdfBase64) {
+
+        throw new Error(
+          "pdfBase64 tidak ditemukan."
+        );
+
+      }
+
+
+      const pdfBase64 =
+        cleanBase64(
+          body.pdfBase64
+        );
+
+
+      const pdfBytes =
+        base64ToUint8Array(
+          pdfBase64
+        );
+
+
+      if (
+        pdfBytes.length < 100
+      ) {
+
+        throw new Error(
+          "pdfBase64 tidak valid atau PDF kosong."
+        );
+
+      }
+
+
+      // ------------------------------------------------------
+      // GET HTML TEMPLATE
+      // ------------------------------------------------------
 
       const templateResponse =
         await fetch(
@@ -142,68 +202,44 @@ export default {
       ) {
 
         throw new Error(
-          `Template GitHub gagal diambil. HTTP ${templateResponse.status}`
+          "Gagal mengambil template " +
+          templateName +
+          ".html dari GitHub. HTTP " +
+          templateResponse.status
         );
+
       }
 
 
-      let template =
+      let html =
         await templateResponse.text();
 
 
-      // ==================================================
-      // PDF INPUT
-      // ==================================================
-
-      if (!body.pdfBase64) {
-
-        throw new Error(
-          "pdfBase64 belum dikirim dari Power Automate."
-        );
-      }
-
-
-      const pdfBytes =
-        base64ToUint8Array(
-          cleanBase64(
-            body.pdfBase64
-          )
-        );
-
-
-      // ==================================================
+      // ------------------------------------------------------
       // EXTRACT PDF
-      // ==================================================
+      // ------------------------------------------------------
 
-      const extracted =
-        await extractPdf(
+      const pdfData =
+        await extractPDF(
           env,
           pdfBytes
         );
 
 
-      // ==================================================
-      // DATA TABEL
-      // ==================================================
+      // ------------------------------------------------------
+      // TABLE
+      // ------------------------------------------------------
 
-      const rows =
-        extracted.rows;
-
-
-      // ==================================================
-      // TABLE HTML
-      // ==================================================
-
-      const tableHtml =
-        buildTable(
-          rows,
+      const tableHTML =
+        buildTableHTML(
+          pdfData.rows,
           templateName
         );
 
 
-      // ==================================================
+      // ------------------------------------------------------
       // REPLACE Satu - Duabelas
-      // ==================================================
+      // ------------------------------------------------------
 
       const fields = [
 
@@ -228,96 +264,89 @@ export default {
       ) {
 
         const value =
-          body[field] ??
-          "";
+          body[field] == null
+            ? ""
+            : String(body[field]);
 
 
-        template =
-          template
-            .split(
-              `{{${field}}}`
-            )
-            .join(
-              escapeHtml(
-                String(value)
-              )
-            );
+        html =
+          html.split(
+            "{{" + field + "}}"
+          ).join(
+            escapeHTML(value)
+          );
+
       }
 
 
-      // ==================================================
-      // TABLEPDF
-      // ==================================================
+      // ------------------------------------------------------
+      // TABLE PDF
+      // ------------------------------------------------------
 
-      template =
-        template
-          .split(
-            "{{TablePDF}}"
-          )
-          .join(
-            tableHtml
-          );
+      html =
+        html.split(
+          "{{TablePDF}}"
+        ).join(
+          tableHTML
+        );
 
 
-      // ==================================================
+      // ------------------------------------------------------
       // TTD + STEMPEL
-      // ==================================================
+      // ------------------------------------------------------
 
-      const signatureHtml =
-        buildSignature(
+      const signatureHTML =
+        buildSignatureHTML(
           body.ttdBase64,
           body.stempelBase64
         );
 
 
-      template =
-        template
-          .split(
-            "{{TTD&Stemp}}"
-          )
-          .join(
-            signatureHtml
-          );
+      html =
+        html.split(
+          "{{TTD&Stemp}}"
+        ).join(
+          signatureHTML
+        );
 
 
-      // ==================================================
-      // REMOVE LEFTOVER PLACEHOLDERS
-      // ==================================================
+      // ------------------------------------------------------
+      // REMOVE PLACEHOLDER YANG TERSISA
+      // ------------------------------------------------------
 
-      template =
-        template.replace(
+      html =
+        html.replace(
           /\{\{[^{}]+\}\}/g,
           ""
         );
 
 
-      // ==================================================
-      // BUILD PAGES
-      // ==================================================
+      // ------------------------------------------------------
+      // BUILD MULTI PAGE
+      // ------------------------------------------------------
 
-      const finalHtml =
-        buildPages(
-          template,
-          extracted.totalPages,
-          extracted.pages
+      const finalHTML =
+        buildMultiPageHTML(
+          html,
+          pdfData.totalPages
         );
 
 
-      // ==================================================
+      // ------------------------------------------------------
       // HTML -> PDF
-      // ==================================================
+      // ------------------------------------------------------
 
-      const pdfResult =
+      const pdfResponse =
         await env.BROWSER.quickAction(
           "pdf",
           {
             html:
-              finalHtml,
+              finalHTML,
 
             pdfOptions: {
 
               format:
-                "a4",
+                "A4",
 
               landscape:
                 false,
@@ -344,38 +373,40 @@ export default {
 
 
       if (
-        !pdfResult.ok
+        !pdfResponse.ok
       ) {
 
-        const errorText =
-          await pdfResult.text();
+        const error =
+          await pdfResponse.text();
 
 
         throw new Error(
-          `HTML ke PDF gagal: ${errorText}`
+          "HTML → PDF gagal: " +
+          error
         );
+
       }
 
 
-      // ==================================================
-      // PDF -> BASE64
-      // ==================================================
+      // ------------------------------------------------------
+      // PDF OUTPUT
+      // ------------------------------------------------------
 
       const outputBytes =
         new Uint8Array(
-          await pdfResult.arrayBuffer()
+          await pdfResponse.arrayBuffer()
         );
 
 
-      const spBase64 =
+      const outputBase64 =
         bytesToBase64(
           outputBytes
         );
 
 
-      // ==================================================
+      // ------------------------------------------------------
       // RESPONSE
-      // ==================================================
+      // ------------------------------------------------------
 
       return json({
 
@@ -383,7 +414,7 @@ export default {
           true,
 
         message:
-          "SP PDF berhasil dibuat.",
+          "PDF berhasil dibuat.",
 
         template:
           templateName === "prekursor"
@@ -391,18 +422,19 @@ export default {
             : "Reguler",
 
         pages:
-          extracted.totalPages,
+          pdfData.totalPages,
 
         tableRows:
-          rows.length,
+          pdfData.rows.length,
 
         totalQtyShipping:
-          extracted.totalQtyShipping,
+          pdfData.totalQtyShipping,
 
         spBase64:
-          spBase64
+          outputBase64
 
       });
+
 
     } catch (error) {
 
@@ -412,8 +444,10 @@ export default {
           false,
 
         message:
-          error?.message ||
-          "Terjadi error."
+          error &&
+          error.message
+            ? error.message
+            : String(error)
 
       }, 500);
 
@@ -424,11 +458,11 @@ export default {
 };
 
 
-// ========================================================
-// PDF -> MARKDOWN
-// ========================================================
+// ============================================================
+// EXTRACT PDF
+// ============================================================
 
-async function extractPdf(
+async function extractPDF(
   env,
   pdfBytes
 ) {
@@ -444,23 +478,22 @@ async function extractPdf(
 
 
   /*
-  Cloudflare Workers AI
-  membaca PDF langsung.
-
-  Kita sengaja menggunakan markdown,
-  bukan text, karena struktur tabel
-  lebih mudah dipertahankan.
+  Workers AI membaca PDF langsung.
+  Tidak menggunakan pdfjs-serverless.
   */
+
 
   const result =
     await env.AI.toMarkdown(
 
       {
+
         name:
           "upload.pdf",
 
         blob:
           blob
+
       },
 
       {
@@ -471,13 +504,6 @@ async function extractPdf(
 
             format:
               "markdown"
-
-          },
-
-          pdf: {
-
-            metadata:
-              false
 
           }
 
@@ -494,15 +520,24 @@ async function extractPdf(
       : result;
 
 
+  if (!converted) {
+
+    throw new Error(
+      "Workers AI tidak mengembalikan hasil."
+    );
+
+  }
+
+
   if (
-    !converted ||
     converted.format === "error"
   ) {
 
     throw new Error(
-      converted?.error ||
-      "PDF gagal dibaca oleh Workers AI."
+      converted.error ||
+      "Workers AI gagal membaca PDF."
     );
+
   }
 
 
@@ -513,86 +548,135 @@ async function extractPdf(
     );
 
 
-  if (!markdown.trim()) {
+  if (
+    markdown.trim() === ""
+  ) {
 
     throw new Error(
-      "PDF berhasil dibaca tetapi tidak menghasilkan teks."
+      "PDF terbaca tetapi tidak ada teks yang dapat diekstrak."
     );
+
   }
 
 
-  // ======================================================
+  // ----------------------------------------------------------
   // PAGE COUNT
-  // ======================================================
+  // ----------------------------------------------------------
 
-  const pageMatches =
-    markdown.match(
-      /(?:^|\n)#{1,6}\s*Page\s+\d+\b/gi
-    );
+  const pageNumbers = [];
+
+
+  const pageRegex =
+    /(?:^|\n)\s*#{1,6}\s*Page\s+(\d+)\b/gi;
+
+
+  let match;
+
+
+  while (
+    (match =
+      pageRegex.exec(markdown))
+    !== null
+  ) {
+
+    const number =
+      Number(
+        match[1]
+      );
+
+
+    if (
+      Number.isFinite(number)
+    ) {
+
+      pageNumbers.push(
+        number
+      );
+
+    }
+
+  }
 
 
   let totalPages =
-    pageMatches
-      ? pageMatches.length
+    pageNumbers.length
+      ? Math.max(
+          ...pageNumbers
+        )
       : 1;
 
 
-  /*
-  Kalau converter menghasilkan
-  Page 1 ... Page 6,
-  kita langsung mendapatkan 6.
+  // ----------------------------------------------------------
+  // EXTRACT ROWS
+  // ----------------------------------------------------------
 
-  Kalau tidak ada heading Page,
-  fallback 1.
-  */
-
-  if (
-    totalPages < 1
-  ) {
-
-    totalPages = 1;
-
-  }
-
-
-  // ======================================================
-  // EXTRACT TABLE
-  // ======================================================
-
-  const rows =
-    extractRowsFromMarkdown(
+  let rows =
+    extractMarkdownTable(
       markdown
     );
 
 
-  // ======================================================
-  // TOTAL QTY
-  // ======================================================
+  // ----------------------------------------------------------
+  // FALLBACK TEXT
+  // ----------------------------------------------------------
+
+  if (
+    rows.length === 0
+  ) {
+
+    rows =
+      extractPlainTextRows(
+        markdown
+      );
+
+  }
+
+
+  // ----------------------------------------------------------
+  // REMOVE DUPLICATES
+  // ----------------------------------------------------------
+
+  rows =
+    removeDuplicateRows(
+      rows
+    );
+
+
+  // ----------------------------------------------------------
+  // TOTAL
+  // ----------------------------------------------------------
 
   const totalQtyShipping =
     rows.reduce(
 
-      (sum, row) => {
+      function(sum, row) {
+
+        const value =
+          String(
+            row.jumlah ||
+            ""
+          ).replace(
+            /[^\d.-]/g,
+            ""
+          );
+
 
         const qty =
           Number(
-            String(
-              row.jumlah ||
-              "0"
-            )
-              .replace(
-                /[^\d.-]/g,
-                ""
-              )
+            value
           );
 
 
-        return sum +
-          (
-            Number.isFinite(qty)
-              ? qty
-              : 0
-          );
+        if (
+          Number.isFinite(qty)
+        ) {
+
+          return sum + qty;
+
+        }
+
+
+        return sum;
 
       },
 
@@ -601,24 +685,13 @@ async function extractPdf(
     );
 
 
-  // ======================================================
-  // PAGE DATA
-  // ======================================================
-
-  const pages =
-    splitPages(
-      markdown,
-      totalPages
-    );
-
-
   return {
+
+    markdown,
 
     totalPages,
 
     rows,
-
-    pages,
 
     totalQtyShipping
 
@@ -627,11 +700,11 @@ async function extractPdf(
 }
 
 
-// ========================================================
-// EXTRACT TABLE FROM MARKDOWN
-// ========================================================
+// ============================================================
+// EXTRACT MARKDOWN TABLE
+// ============================================================
 
-function extractRowsFromMarkdown(
+function extractMarkdownTable(
   markdown
 ) {
 
@@ -639,8 +712,9 @@ function extractRowsFromMarkdown(
     markdown
       .split(/\r?\n/)
       .map(
-        line =>
-          line.trim()
+        function(line) {
+          return line.trim();
+        }
       )
       .filter(
         Boolean
@@ -650,76 +724,96 @@ function extractRowsFromMarkdown(
   const rows = [];
 
 
-  // ======================================================
-  // METHOD 1
-  // MARKDOWN TABLE
-  // ======================================================
-
   for (
     let i = 0;
     i < lines.length;
     i++
   ) {
 
-    const line =
+    const headerLine =
       lines[i];
 
 
     if (
-      !line.includes("|")
+      !headerLine.includes("|")
     ) {
+
       continue;
+
     }
 
 
-    const cells =
+    const header =
       parseMarkdownRow(
-        line
+        headerLine
       );
 
 
     if (
-      cells.length < 5
+      header.length < 7
     ) {
+
       continue;
+
     }
 
 
     const normalized =
-      cells.map(
+      header.map(
         normalizeHeader
       );
 
 
-    const hasHeader =
+    const hasNo =
       normalized.some(
-        x =>
-          x === "no"
-      ) &&
-
-      normalized.some(
-        x =>
-          x.includes(
-            "productsku"
-          )
-      ) &&
-
-      normalized.some(
-        x =>
-          x.includes(
-            "productdescription"
-          )
+        function(x) {
+          return x === "no";
+        }
       );
 
 
-    if (!hasHeader) {
+    const hasSKU =
+      normalized.some(
+        function(x) {
+          return (
+            x.includes(
+              "productsku"
+            ) ||
+            x === "sku"
+          );
+        }
+      );
+
+
+    const hasDescription =
+      normalized.some(
+        function(x) {
+          return (
+            x.includes(
+              "productdescription"
+            ) ||
+            x.includes(
+              "description"
+            )
+          );
+        }
+      );
+
+
+    if (
+      !hasNo ||
+      !hasSKU ||
+      !hasDescription
+    ) {
+
       continue;
+
     }
 
 
-    // -----------------------------------------------
-    // Cari baris data setelah header
-    // -----------------------------------------------
+    // --------------------------------------------------------
+    // DATA ROWS
+    // --------------------------------------------------------
 
     for (
       let j = i + 1;
@@ -727,35 +821,43 @@ function extractRowsFromMarkdown(
       j++
     ) {
 
-      const dataLine =
+      const line =
         lines[j];
 
 
       if (
-        !dataLine.includes("|")
+        !line.includes("|")
       ) {
+
+        if (
+          rows.length > 0
+        ) {
+
+          break;
+
+        }
+
         continue;
+
       }
 
 
-      const dataCells =
+      const cells =
         parseMarkdownRow(
-          dataLine
+          line
         );
 
 
+      // separator
       if (
-        dataCells.length <
-        cells.length
-      ) {
-        continue;
-      }
+        cells.every(
+          function(cell) {
 
+            return /^[-: ]+$/.test(
+              cell
+            );
 
-      if (
-        !/^\d+$/.test(
-          dataCells[0]
-            .trim()
+          }
         )
       ) {
 
@@ -764,9 +866,18 @@ function extractRowsFromMarkdown(
       }
 
 
+      if (
+        cells.length < 7
+      ) {
+
+        continue;
+
+      }
+
+
       const row =
-        mapPdfColumns(
-          dataCells
+        mapColumns(
+          cells
         );
 
 
@@ -783,71 +894,14 @@ function extractRowsFromMarkdown(
   }
 
 
-  // ======================================================
-  // METHOD 2
-  // PLAIN TEXT FALLBACK
-  // ======================================================
-
-  if (
-    rows.length === 0
-  ) {
-
-    const fallback =
-      extractRowsFromPlainText(
-        markdown
-      );
-
-
-    rows.push(
-      ...fallback
-    );
-
-  }
-
-
-  // ======================================================
-  // REMOVE DUPLICATES
-  // ======================================================
-
-  const unique =
-    [];
-
-  const seen =
-    new Set();
-
-
-  for (
-    const row of rows
-  ) {
-
-    const key =
-      `${row.no}|${row.sku}|${row.nama}`;
-
-
-    if (
-      seen.has(key)
-    ) {
-      continue;
-    }
-
-
-    seen.add(key);
-
-    unique.push(
-      row
-    );
-
-  }
-
-
-  return unique;
+  return rows;
 
 }
 
 
-// ========================================================
-// MARKDOWN ROW
-// ========================================================
+// ============================================================
+// MARKDOWN ROW PARSER
+// ============================================================
 
 function parseMarkdownRow(
   line
@@ -883,27 +937,29 @@ function parseMarkdownRow(
   return value
     .split("|")
     .map(
-      x =>
-        x.trim()
-    )
-    .filter(
-      (_, index) =>
-        true
+      function(cell) {
+        return cell
+          .trim()
+          .replace(
+            /<br\s*\/?>/gi,
+            " "
+          );
+      }
     );
 
 }
 
 
-// ========================================================
-// MAP PDF COLUMNS
-// ========================================================
+// ============================================================
+// MAP COLUMNS
+// ============================================================
 
-function mapPdfColumns(
+function mapColumns(
   cells
 ) {
 
   /*
-  Struktur asli PDF:
+  PDF asli:
 
   0 No
   1 Product SKU
@@ -927,13 +983,11 @@ function mapPdfColumns(
 
 
   const no =
-    cells[0];
+    cells[0].trim();
 
 
   if (
-    !/^\d+$/.test(
-      String(no).trim()
-    )
+    !/^\d+$/.test(no)
   ) {
 
     return null;
@@ -944,50 +998,42 @@ function mapPdfColumns(
   return {
 
     no:
-      no.trim(),
+      no,
 
     sku:
-      cells[1]?.trim() ||
-      "",
+      cells[1].trim(),
 
     nama:
-      cells[2]?.trim() ||
-      "",
+      cells[2].trim(),
 
     satuan:
-      cells[3]?.trim() ||
-      "",
+      cells[3].trim(),
 
     casePack:
-      cells[4]?.trim() ||
-      "",
+      cells[4].trim(),
 
     jumlah:
-      cells[5]?.trim() ||
-      "",
+      cells[5].trim(),
 
     batch:
-      cells[6]?.trim() ||
-      "",
+      cells[6].trim(),
 
     expired:
-      cells[7]?.trim() ||
-      "",
+      cells[7].trim(),
 
     keterangan:
-      cells[8]?.trim() ||
-      ""
+      cells[8].trim()
 
   };
 
 }
 
 
-// ========================================================
+// ============================================================
 // PLAIN TEXT FALLBACK
-// ========================================================
+// ============================================================
 
-function extractRowsFromPlainText(
+function extractPlainTextRows(
   text
 ) {
 
@@ -995,8 +1041,9 @@ function extractRowsFromPlainText(
     text
       .split(/\r?\n/)
       .map(
-        x =>
-          x.trim()
+        function(line) {
+          return line.trim();
+        }
       )
       .filter(
         Boolean
@@ -1011,38 +1058,38 @@ function extractRowsFromPlainText(
   ) {
 
     /*
-    Contoh:
+    Kita hanya mulai dari baris:
 
-    1 3039929 A+ LUBRICATING...
+    1 3039929 ...
+
     */
 
-    const match =
+    const start =
       line.match(
         /^(\d+)\s+(\d{5,})\s+(.+)$/
       );
 
 
-    if (!match) {
+    if (!start) {
+
       continue;
+
     }
 
 
     const no =
-      match[1];
-
+      start[1];
 
     const sku =
-      match[2];
-
+      start[2];
 
     let rest =
-      match[3];
+      start[3].trim();
 
 
-    /*
-    Ambil Invoice No
-    sebagai angka terakhir.
-    */
+    // --------------------------------------------------------
+    // INVOICE
+    // --------------------------------------------------------
 
     const invoiceMatch =
       rest.match(
@@ -1051,7 +1098,9 @@ function extractRowsFromPlainText(
 
 
     if (!invoiceMatch) {
+
       continue;
+
     }
 
 
@@ -1060,41 +1109,47 @@ function extractRowsFromPlainText(
 
 
     rest =
-      rest.substring(
-        0,
-        invoiceMatch.index
-      ).trim();
+      rest
+        .substring(
+          0,
+          invoiceMatch.index
+        )
+        .trim();
 
 
-    /*
-    Expired Date
-    */
+    // --------------------------------------------------------
+    // EXPIRED
+    // --------------------------------------------------------
 
-    const dateMatch =
+    const expiredMatch =
       rest.match(
         /(\d{4}-\d{2}-\d{2})\s*$/
       );
 
 
-    if (!dateMatch) {
+    if (!expiredMatch) {
+
       continue;
+
     }
 
 
     const expired =
-      dateMatch[1];
+      expiredMatch[1];
 
 
     rest =
-      rest.substring(
-        0,
-        dateMatch.index
-      ).trim();
+      rest
+        .substring(
+          0,
+          expiredMatch.index
+        )
+        .trim();
 
 
-    /*
-    Batch Number
-    */
+    // --------------------------------------------------------
+    // BATCH
+    // --------------------------------------------------------
 
     const batchMatch =
       rest.match(
@@ -1103,7 +1158,9 @@ function extractRowsFromPlainText(
 
 
     if (!batchMatch) {
+
       continue;
+
     }
 
 
@@ -1112,51 +1169,50 @@ function extractRowsFromPlainText(
 
 
     rest =
-      rest.substring(
-        0,
-        batchMatch.index
-      ).trim();
+      rest
+        .substring(
+          0,
+          batchMatch.index
+        )
+        .trim();
 
 
-    /*
-    Qty Shipping + Case Pack
+    // --------------------------------------------------------
+    // TWO NUMBERS
+    // --------------------------------------------------------
 
-    Contoh:
-    ... BOTOL 2 2
-
-    Kita ambil dua angka
-    terakhir.
-    */
-
-    const qtyMatch =
+    const numbers =
       rest.match(
         /(\d+)\s+(\d+)\s*$/
       );
 
 
-    if (!qtyMatch) {
+    if (!numbers) {
+
       continue;
+
     }
 
 
-    const qty =
-      qtyMatch[1];
-
-
     const casePack =
-      qtyMatch[2];
+      numbers[1];
+
+    const qty =
+      numbers[2];
 
 
     rest =
-      rest.substring(
-        0,
-        qtyMatch.index
-      ).trim();
+      rest
+        .substring(
+          0,
+          numbers.index
+        )
+        .trim();
 
 
-    /*
-    Kemasan adalah token terakhir.
-    */
+    // --------------------------------------------------------
+    // KEMASAN
+    // --------------------------------------------------------
 
     const packageMatch =
       rest.match(
@@ -1165,7 +1221,9 @@ function extractRowsFromPlainText(
 
 
     if (!packageMatch) {
+
       continue;
+
     }
 
 
@@ -1214,37 +1272,111 @@ function extractRowsFromPlainText(
 }
 
 
-// ========================================================
-// BUILD TABLE
-// ========================================================
+// ============================================================
+// REMOVE DUPLICATE
+// ============================================================
 
-function buildTable(
+function removeDuplicateRows(
+  rows
+) {
+
+  const result = [];
+
+  const seen =
+    new Set();
+
+
+  for (
+    const row of rows
+  ) {
+
+    const key =
+      [
+        row.no,
+        row.sku,
+        row.nama
+      ].join("|");
+
+
+    if (
+      seen.has(key)
+    ) {
+
+      continue;
+
+    }
+
+
+    seen.add(key);
+
+    result.push(
+      row
+    );
+
+  }
+
+
+  return result;
+
+}
+
+
+// ============================================================
+// BUILD TABLE HTML
+// ============================================================
+
+function buildTableHTML(
   rows,
   templateName
 ) {
 
   if (
-    !rows.length
+    rows.length === 0
   ) {
 
     return `
 
-<div class="table-empty">
-Tidak ada data tabel yang berhasil dibaca dari PDF upload.
-</div>
+<table class="medicine-table">
+
+<thead>
+
+<tr>
+
+<th>No</th>
+<th>Nama Obat</th>
+<th>Satuan</th>
+<th>Jumlah</th>
+<th>Keterangan</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+<tr>
+
+<td colspan="5">
+Data tabel PDF tidak berhasil diekstrak.
+</td>
+
+</tr>
+
+</tbody>
+
+</table>
 
 `;
 
   }
 
 
-  // ======================================================
+  // ==========================================================
   // REGULER
-  // ======================================================
+  // ==========================================================
 
   if (
-    templateName ===
-    "reguler"
+    templateName === "reguler"
   ) {
 
     let html = `
@@ -1270,6 +1402,7 @@ Tidak ada data tabel yang berhasil dibaca dari PDF upload.
 </thead>
 
 <tbody>
+
 `;
 
 
@@ -1282,23 +1415,23 @@ Tidak ada data tabel yang berhasil dibaca dari PDF upload.
 <tr>
 
 <td>
-${escapeHtml(row.no)}
+${escapeHTML(row.no)}
 </td>
 
 <td>
-${escapeHtml(row.nama)}
+${escapeHTML(row.nama)}
 </td>
 
 <td>
-${escapeHtml(row.satuan)}
+${escapeHTML(row.satuan)}
 </td>
 
 <td>
-${escapeHtml(row.jumlah)}
+${escapeHTML(row.jumlah)}
 </td>
 
 <td>
-${escapeHtml(row.keterangan)}
+${escapeHTML(row.keterangan)}
 </td>
 
 </tr>
@@ -1313,16 +1446,18 @@ ${escapeHtml(row.keterangan)}
 </tbody>
 
 </table>
+
 `;
+
 
     return html;
 
   }
 
 
-  // ======================================================
+  // ==========================================================
   // PREKURSOR
-  // ======================================================
+  // ==========================================================
 
   let html = `
 
@@ -1351,6 +1486,7 @@ ${escapeHtml(row.keterangan)}
 </thead>
 
 <tbody>
+
 `;
 
 
@@ -1358,31 +1494,20 @@ ${escapeHtml(row.keterangan)}
     const row of rows
   ) {
 
-    /*
-    Untuk sekarang:
-
-    Zat Aktif = kosong
-    Bentuk    = kosong
-
-    Nanti kita sambungkan
-    ke master_prekursor.csv
-    berdasarkan SKU.
-    */
-
     html += `
 
 <tr>
 
 <td>
-${escapeHtml(row.no)}
+${escapeHTML(row.no)}
 </td>
 
 <td>
-${escapeHtml(row.nama)}
+${escapeHTML(row.nama)}
 </td>
 
 <td>
-${escapeHtml(row.satuan)}
+${escapeHTML(row.satuan)}
 </td>
 
 <td>
@@ -1392,11 +1517,11 @@ ${escapeHtml(row.satuan)}
 </td>
 
 <td>
-${escapeHtml(row.jumlah)}
+${escapeHTML(row.jumlah)}
 </td>
 
 <td>
-${escapeHtml(row.keterangan)}
+${escapeHTML(row.keterangan)}
 </td>
 
 </tr>
@@ -1411,6 +1536,7 @@ ${escapeHtml(row.keterangan)}
 </tbody>
 
 </table>
+
 `;
 
 
@@ -1419,16 +1545,25 @@ ${escapeHtml(row.keterangan)}
 }
 
 
-// ========================================================
-// SPLIT PAGE
-// ========================================================
+// ============================================================
+// MULTI PAGE HTML
+// ============================================================
 
-function splitPages(
-  markdown,
+function buildMultiPageHTML(
+  template,
   totalPages
 ) {
 
-  const result = [];
+  let pages = "";
+
+
+  /*
+  Template Reguler.html / Prekursor.html
+  sudah memiliki .a4-container.
+
+  Kita ulangi sebanyak jumlah halaman
+  PDF upload.
+  */
 
 
   for (
@@ -1437,73 +1572,13 @@ function splitPages(
     i++
   ) {
 
-    const regex =
-      new RegExp(
-        `(?:^|\\n)#{1,6}\\s*Page\\s+${i}\\b`,
-        "i"
-      );
+    pages += `
 
-
-    const match =
-      markdown.match(
-        regex
-      );
-
-
-    result.push({
-
-      page:
-        i,
-
-      exists:
-        Boolean(match)
-
-    });
-
-  }
-
-
-  return result;
-
-}
-
-
-// ========================================================
-// BUILD HTML PAGES
-// ========================================================
-
-function buildPages(
-  template,
-  totalPages,
-  pages
-) {
-
-  let pageHtml =
-    "";
-
-
-  /*
-  IMPORTANT:
-
-  Template HTML bosku sudah mempunyai
-  .a4-container.
-
-  Kita buat satu template per halaman.
-  */
-
-  for (
-    let i = 0;
-    i < totalPages;
-    i++
-  ) {
-
-    pageHtml += `
-
-<section class="pdf-page">
+<div class="pdf-page">
 
 ${template}
 
-</section>
+</div>
 
 `;
 
@@ -1524,11 +1599,9 @@ ${template}
 
 @page {
 
-  size:
-    A4 portrait;
+  size: A4 portrait;
 
-  margin:
-    0;
+  margin: 0;
 
 }
 
@@ -1536,76 +1609,56 @@ ${template}
 html,
 body {
 
-  margin:
-    0;
+  margin: 0;
 
-  padding:
-    0;
+  padding: 0;
 
-  width:
-    210mm;
+  width: 210mm;
 
-  background:
-    #ffffff;
+  background: #ffffff;
 
 }
 
 
 .pdf-page {
 
-  position:
-    relative;
+  width: 210mm;
 
-  width:
-    210mm;
+  height: 297mm;
 
-  height:
-    297mm;
+  position: relative;
 
-  overflow:
-    hidden;
+  overflow: hidden;
 
-  page-break-after:
-    always;
-
-  box-sizing:
-    border-box;
+  page-break-after: always;
 
 }
 
 
 .pdf-page:last-child {
 
-  page-break-after:
-    auto;
+  page-break-after: auto;
 
 }
 
 
-/* ============================================
+/* ==========================================================
    TABLE
-   ============================================ */
+   ========================================================== */
 
 .medicine-table {
 
-  width:
-    100%;
+  width: 100%;
 
-  border-collapse:
-    collapse;
+  border-collapse: collapse;
 
-  font-family:
-    Arial,
-    sans-serif;
+  font-family: Arial, sans-serif;
 
-  font-size:
-    9px;
+  font-size: 9px;
 
-  table-layout:
-    fixed;
+  table-layout: fixed;
 
-  margin-bottom:
-    8px;
+  margin-bottom: 8px;
 
 }
 
@@ -1613,250 +1666,175 @@ body {
 .medicine-table th,
 .medicine-table td {
 
-  border:
-    1px solid #000000;
+  border: 1px solid #000;
 
-  padding:
-    4px;
+  padding: 4px;
 
-  vertical-align:
-    top;
+  vertical-align: top;
 
-  word-wrap:
-    break-word;
+  word-wrap: break-word;
 
-  overflow-wrap:
-    anywhere;
+  overflow-wrap: anywhere;
 
 }
 
 
-/* ============================================
+/* ==========================================================
    REGULER
-   ============================================ */
+   ========================================================== */
 
-.regular-table
-th:nth-child(1),
-.regular-table
-td:nth-child(1) {
+.regular-table th:nth-child(1),
+.regular-table td:nth-child(1) {
 
-  width:
-    7%;
+  width: 7%;
 
 }
 
 
-.regular-table
-th:nth-child(2),
-.regular-table
-td:nth-child(2) {
+.regular-table th:nth-child(2),
+.regular-table td:nth-child(2) {
 
-  width:
-    43%;
+  width: 43%;
 
 }
 
 
-.regular-table
-th:nth-child(3),
-.regular-table
-td:nth-child(3) {
+.regular-table th:nth-child(3),
+.regular-table td:nth-child(3) {
 
-  width:
-    15%;
+  width: 15%;
 
 }
 
 
-.regular-table
-th:nth-child(4),
-.regular-table
-td:nth-child(4) {
+.regular-table th:nth-child(4),
+.regular-table td:nth-child(4) {
 
-  width:
-    10%;
+  width: 10%;
 
 }
 
 
-.regular-table
-th:nth-child(5),
-.regular-table
-td:nth-child(5) {
+.regular-table th:nth-child(5),
+.regular-table td:nth-child(5) {
 
-  width:
-    25%;
+  width: 25%;
 
 }
 
 
-/* ============================================
+/* ==========================================================
    PREKURSOR
-   ============================================ */
+   ========================================================== */
 
-.precursor-table
-th:nth-child(1),
-.precursor-table
-td:nth-child(1) {
+.precursor-table th:nth-child(1),
+.precursor-table td:nth-child(1) {
 
-  width:
-    6%;
+  width: 6%;
 
 }
 
 
-.precursor-table
-th:nth-child(2),
-.precursor-table
-td:nth-child(2) {
+.precursor-table th:nth-child(2),
+.precursor-table td:nth-child(2) {
 
-  width:
-    25%;
+  width: 25%;
 
 }
 
 
-.precursor-table
-th:nth-child(3),
-.precursor-table
-td:nth-child(3) {
+.precursor-table th:nth-child(3),
+.precursor-table td:nth-child(3) {
 
-  width:
-    10%;
+  width: 10%;
 
 }
 
 
-.precursor-table
-th:nth-child(4),
-.precursor-table
-td:nth-child(4) {
+.precursor-table th:nth-child(4),
+.precursor-table td:nth-child(4) {
 
-  width:
-    19%;
+  width: 19%;
 
 }
 
 
-.precursor-table
-th:nth-child(5),
-.precursor-table
-td:nth-child(5) {
+.precursor-table th:nth-child(5),
+.precursor-table td:nth-child(5) {
 
-  width:
-    12%;
+  width: 12%;
 
 }
 
 
-.precursor-table
-th:nth-child(6),
-.precursor-table
-td:nth-child(6) {
+.precursor-table th:nth-child(6),
+.precursor-table td:nth-child(6) {
 
-  width:
-    8%;
+  width: 8%;
 
 }
 
 
-.precursor-table
-th:nth-child(7),
-.precursor-table
-td:nth-child(7) {
+.precursor-table th:nth-child(7),
+.precursor-table td:nth-child(7) {
 
-  width:
-    20%;
+  width: 20%;
 
 }
 
 
-/* ============================================
-   EMPTY
-   ============================================ */
-
-.table-empty {
-
-  border:
-    1px solid #000;
-
-  padding:
-    8px;
-
-  font-size:
-    9px;
-
-}
-
-
-/* ============================================
+/* ==========================================================
    SIGNATURE
-   ============================================ */
+   ========================================================== */
 
 .signature-container {
 
-  position:
-    relative;
+  position: relative;
 
-  width:
-    150px;
+  width: 150px;
 
-  height:
-    100px;
+  height: 100px;
 
 }
 
 
-.signature-container
-.stamp {
+.signature-container img {
 
-  position:
-    absolute;
-
-  left:
-    40px;
-
-  top:
-    15px;
-
-  width:
-    85px;
-
-  height:
-    85px;
-
-  object-fit:
-    contain;
-
-  z-index:
-    1;
+  object-fit: contain;
 
 }
 
 
-.signature-container
-.signature {
+.signature-container .stamp {
 
-  position:
-    absolute;
+  position: absolute;
 
-  left:
-    0;
+  left: 40px;
 
-  top:
-    0;
+  top: 15px;
 
-  width:
-    105px;
+  width: 85px;
 
-  height:
-    60px;
+  height: 85px;
 
-  object-fit:
-    contain;
+  z-index: 1;
 
-  z-index:
-    2;
+}
+
+
+.signature-container .signature {
+
+  position: absolute;
+
+  left: 0;
+
+  top: 0;
+
+  width: 105px;
+
+  height: 60px;
+
+  z-index: 2;
 
 }
 
@@ -1866,7 +1844,7 @@ td:nth-child(7) {
 
 <body>
 
-${pageHtml}
+${pages}
 
 </body>
 
@@ -1877,13 +1855,13 @@ ${pageHtml}
 }
 
 
-// ========================================================
+// ============================================================
 // TTD + STEMPEL
-// ========================================================
+// ============================================================
 
-function buildSignature(
+function buildSignatureHTML(
   ttdBase64,
-  stampBase64
+  stempelBase64
 ) {
 
   const ttd =
@@ -1894,7 +1872,7 @@ function buildSignature(
 
   const stamp =
     normalizeImage(
-      stampBase64
+      stempelBase64
     );
 
 
@@ -1916,8 +1894,8 @@ ${
   stamp
     ? `
 <img
-  src="${stamp}"
   class="stamp"
+  src="${stamp}"
 />
 `
     : ""
@@ -1927,8 +1905,8 @@ ${
   ttd
     ? `
 <img
-  src="${ttd}"
   class="signature"
+  src="${ttd}"
 />
 `
     : ""
@@ -1941,53 +1919,32 @@ ${
 }
 
 
-// ========================================================
-// BASE64 CLEAN
-// ========================================================
+// ============================================================
+// NORMALIZE IMAGE
+// ============================================================
 
-function cleanBase64(
+function normalizeImage(
   value
 ) {
 
-  let v =
-    String(value || "")
-      .trim();
+  if (!value) {
 
-
-  // -----------------------------------------------
-  // DATA URI
-  // -----------------------------------------------
-
-  if (
-    v.startsWith(
-      "data:"
-    )
-  ) {
-
-    const comma =
-      v.indexOf(",");
-
-
-    if (
-      comma !== -1
-    ) {
-
-      v =
-        v.substring(
-          comma + 1
-        );
-
-    }
+    return "";
 
   }
 
 
-  // -----------------------------------------------
-  // IMG TAG
-  // -----------------------------------------------
+  let image =
+    String(value)
+      .trim();
+
+
+  // ----------------------------------------------------------
+  // <img src="">
+  // ----------------------------------------------------------
 
   const imgMatch =
-    v.match(
+    image.match(
       /<img[^>]+src=["']([^"']+)["']/i
     );
 
@@ -1996,20 +1953,100 @@ function cleanBase64(
     imgMatch
   ) {
 
-    const src =
+    image =
       imgMatch[1];
 
+  }
+
+
+  // ----------------------------------------------------------
+  // DATA IMAGE
+  // ----------------------------------------------------------
+
+  if (
+    image.startsWith(
+      "data:image/"
+    )
+  ) {
+
+    return image;
+
+  }
+
+
+  // ----------------------------------------------------------
+  // RAW BASE64
+  // ----------------------------------------------------------
+
+  image =
+    image.replace(
+      /\s/g,
+      ""
+    );
+
+
+  return (
+    "data:image/png;base64," +
+    image
+  );
+
+}
+
+
+// ============================================================
+// CLEAN BASE64
+// ============================================================
+
+function cleanBase64(
+  value
+) {
+
+  let text =
+    String(
+      value || ""
+    ).trim();
+
+
+  // ----------------------------------------------------------
+  // <img src="data:...">
+  // ----------------------------------------------------------
+
+  const imgMatch =
+    text.match(
+      /<img[^>]+src=["']([^"']+)["']/i
+    );
+
+
+  if (
+    imgMatch
+  ) {
+
+    text =
+      imgMatch[1];
+
+  }
+
+
+  // ----------------------------------------------------------
+  // DATA URI
+  // ----------------------------------------------------------
+
+  if (
+    text.startsWith(
+      "data:"
+    )
+  ) {
 
     const comma =
-      src.indexOf(",");
+      text.indexOf(",");
 
 
     if (
       comma !== -1
     ) {
 
-      v =
-        src.substring(
+      text =
+        text.substring(
           comma + 1
         );
 
@@ -2018,7 +2055,7 @@ function cleanBase64(
   }
 
 
-  return v.replace(
+  return text.replace(
     /\s/g,
     ""
   );
@@ -2026,9 +2063,9 @@ function cleanBase64(
 }
 
 
-// ========================================================
+// ============================================================
 // BASE64 -> UINT8ARRAY
-// ========================================================
+// ============================================================
 
 function base64ToUint8Array(
   base64
@@ -2061,108 +2098,9 @@ function base64ToUint8Array(
 }
 
 
-// ========================================================
-// IMAGE NORMALIZE
-// ========================================================
-
-function normalizeImage(
-  value
-) {
-
-  if (!value) {
-    return "";
-  }
-
-
-  let image =
-    String(value)
-      .trim();
-
-
-  if (
-    image.startsWith(
-      "data:image/"
-    )
-  ) {
-
-    return image;
-
-  }
-
-
-  const img =
-    image.match(
-      /<img[^>]+src=["']([^"']+)["']/i
-    );
-
-
-  if (
-    img
-  ) {
-
-    return img[1];
-
-  }
-
-
-  image =
-    image.replace(
-      /\s/g,
-      ""
-    );
-
-
-  return (
-    "data:image/png;base64," +
-    image
-  );
-
-}
-
-
-// ========================================================
-// HTML ESCAPE
-// ========================================================
-
-function escapeHtml(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-
-    .replace(
-      /</g,
-      "&lt;"
-    )
-
-    .replace(
-      />/g,
-      "&gt;"
-    )
-
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-
-    .replace(
-      /'/g,
-      "&#039;"
-    );
-
-}
-
-
-// ========================================================
+// ============================================================
 // BYTES -> BASE64
-// ========================================================
+// ============================================================
 
 function bytesToBase64(
   bytes
@@ -2203,9 +2141,49 @@ function bytesToBase64(
 }
 
 
-// ========================================================
+// ============================================================
+// ESCAPE HTML
+// ============================================================
+
+function escapeHTML(
+  value
+) {
+
+  return String(
+    value ?? ""
+  )
+
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+
+    .replace(
+      /</g,
+      "&lt;"
+    )
+
+    .replace(
+      />/g,
+      "&gt;"
+    )
+
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+
+// ============================================================
 // HEADER NORMALIZER
-// ========================================================
+// ============================================================
 
 function normalizeHeader(
   value
@@ -2225,13 +2203,13 @@ function normalizeHeader(
 }
 
 
-// ========================================================
+// ============================================================
 // JSON RESPONSE
-// ========================================================
+// ============================================================
 
 function json(
   data,
-  status = 200
+  status
 ) {
 
   return new Response(
@@ -2242,7 +2220,8 @@ function json(
 
     {
 
-      status,
+      status:
+        status || 200,
 
       headers: {
 
