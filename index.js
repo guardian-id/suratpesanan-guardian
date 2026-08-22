@@ -1,14 +1,12 @@
-import { getDocument } from "pdfjs-serverless";
-
 const GITHUB_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
 const TEMPLATE = {
   reguler:
-    `${GITHUB_BASE}/Reguler.html`,
+    "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.html",
 
   prekursor:
-    `${GITHUB_BASE}/Prekursor.html`
+    "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Prekursor.html"
 };
 
 
@@ -44,44 +42,43 @@ export default {
       // TEMPLATE
       // =====================================================
 
-      const requestedTemplate =
-        String(
-          body.template || ""
-        )
+      const templateInput =
+        String(body.template || "Reguler")
           .trim()
           .toLowerCase();
 
 
+      let templateName;
       let templateUrl;
 
 
-      if (
-        requestedTemplate ===
-        "reguler"
-      ) {
+      if (templateInput === "reguler") {
 
-        templateUrl =
-          TEMPLATE.reguler;
+        templateName = "Reguler";
 
-      } else if (
-        requestedTemplate ===
-        "prekursor"
-      ) {
+        templateUrl = TEMPLATE.reguler;
 
-        templateUrl =
-          TEMPLATE.prekursor;
+      }
 
-      } else {
+      else if (templateInput === "prekursor") {
+
+        templateName = "Prekursor";
+
+        templateUrl = TEMPLATE.prekursor;
+
+      }
+
+      else {
 
         throw new Error(
-          `Template tidak valid: "${body.template}". Gunakan Reguler atau Prekursor.`
+          `Template tidak valid: ${body.template}`
         );
 
       }
 
 
       // =====================================================
-      // AMBIL TEMPLATE HTML
+      // AMBIL TEMPLATE HTML DARI GITHUB
       // =====================================================
 
       const templateResponse =
@@ -148,138 +145,55 @@ export default {
 
 
       // =====================================================
-      // PDF SUMBER
+      // TABLE PDF
+      //
+      // SEMENTARA DIABAIKAN
       // =====================================================
 
-      const sourcePdfBase64 =
-        cleanBase64(
-          body.pdfBase64
-        );
+      let tableHtml =
+        body.TablePDF || "";
 
 
-      if (!sourcePdfBase64) {
+      if (!tableHtml) {
 
-        throw new Error(
-          "pdfBase64 tidak ditemukan. Power Automate harus mengirim PDF sumber."
-        );
+        tableHtml = `
+
+          <table class="medicine-table">
+
+            <thead>
+
+              <tr>
+
+                <th>No</th>
+                <th>Nama Obat</th>
+                <th>Satuan</th>
+                <th>Zat Aktif</th>
+                <th>Bentuk</th>
+                <th>Jumlah</th>
+                <th>Keterangan</th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              <tr>
+
+                <td colspan="7">
+                  Tidak ada data tabel.
+                </td>
+
+              </tr>
+
+            </tbody>
+
+          </table>
+
+        `;
 
       }
 
-
-      // =====================================================
-      // PDF BASE64 → BINARY
-      // =====================================================
-
-      const sourcePdfBytes =
-        base64ToBytes(
-          sourcePdfBase64
-        );
-
-
-      // =====================================================
-      // BACA PDF DENGAN PDF.JS
-      // =====================================================
-
-      const pdfDocument =
-        await getDocument({
-
-          data:
-            sourcePdfBytes,
-
-          useSystemFonts:
-            true
-
-        }).promise;
-
-
-      const totalSourcePages =
-        pdfDocument.numPages;
-
-
-      if (
-        !totalSourcePages ||
-        totalSourcePages < 1
-      ) {
-
-        throw new Error(
-          "PDF sumber tidak mempunyai halaman."
-        );
-
-      }
-
-
-      // =====================================================
-      // EXTRACT TEXT PER HALAMAN
-      // =====================================================
-
-      const pages = [];
-
-
-      for (
-        let pageNumber = 1;
-        pageNumber <= totalSourcePages;
-        pageNumber++
-      ) {
-
-        const page =
-          await pdfDocument.getPage(
-            pageNumber
-          );
-
-
-        const textContent =
-          await page.getTextContent();
-
-
-        const items =
-          textContent.items || [];
-
-
-        const text =
-          items
-            .map(
-              item =>
-                String(
-                  item.str || ""
-                )
-            )
-            .join(" ");
-
-
-        pages.push({
-
-          pageNumber,
-
-          text
-
-        });
-
-      }
-
-
-      // =====================================================
-      // PARSE DATA TABEL
-      // =====================================================
-
-      const tableRows =
-        parseSourceTable(
-          pages
-        );
-
-
-      // =====================================================
-      // BUAT TABLE HTML
-      // =====================================================
-
-      const tableHtml =
-        buildMedicineTable(
-          tableRows
-        );
-
-
-      // =====================================================
-      // TABLE
-      // =====================================================
 
       html =
         html
@@ -323,10 +237,12 @@ export default {
             ${
               stamp
                 ? `
+
                   <img
                     src="${stamp}"
                     class="stamp"
                   >
+
                 `
                 : ""
             }
@@ -334,10 +250,12 @@ export default {
             ${
               ttd
                 ? `
+
                   <img
                     src="${ttd}"
                     class="signature"
                   >
+
                 `
                 : ""
             }
@@ -371,7 +289,7 @@ export default {
 
 
       // =====================================================
-      // TAMBAHKAN CSS
+      // TAMBAHKAN CSS PDF
       // =====================================================
 
       html =
@@ -402,15 +320,12 @@ export default {
           "pdf",
           {
 
-            html,
+            html: html,
 
             pdfOptions: {
 
               format:
                 "a4",
-
-              landscape:
-                false,
 
               printBackground:
                 true,
@@ -479,25 +394,20 @@ export default {
           true,
 
         message:
-          "PDF berhasil dibuat.",
+          "HTML berhasil dikonversi menjadi PDF.",
 
         template:
-          requestedTemplate === "reguler"
-            ? "Reguler"
-            : "Prekursor",
+          templateName,
 
-        sourcePages:
-          totalSourcePages,
-
-        tableRows:
-          tableRows.length,
-
-        spBase64
+        spBase64:
+          spBase64
 
       });
 
 
-    } catch (error) {
+    }
+
+    catch (error) {
 
       return response({
 
@@ -518,534 +428,7 @@ export default {
 
 
 // =========================================================
-// PARSE TABLE DARI PDF SUMBER
-// =========================================================
-
-function parseSourceTable(
-  pages
-) {
-
-  const rows = [];
-
-
-  for (
-    const page of pages
-  ) {
-
-    const text =
-      page.text || "";
-
-
-    /*
-      Format sumber:
-
-      No
-      Product SKU
-      Product Description
-      Kemasan
-      Case Pack
-      Qty
-      Shipping
-      Batch Number
-      Expired Date
-      Invoice No
-
-      Contoh:
-
-      1 3102695
-      ACETYLSISTEINE CAPSULE200MG 1S NOVELL
-      BOX 20 2 EIK113 2027-11-01 58216245
-    */
-
-
-    const lines =
-      normalizePdfText(
-        text
-      );
-
-
-    let startIndex =
-      findTableStart(
-        lines
-      );
-
-
-    if (
-      startIndex === -1
-    ) {
-
-      continue;
-
-    }
-
-
-    for (
-      let i =
-        startIndex;
-      i <
-        lines.length;
-      i++
-    ) {
-
-      const line =
-        lines[i];
-
-
-      // -------------------------------------------------
-      // STOP
-      // -------------------------------------------------
-
-      if (
-        /^Total Qty Shipping/i.test(
-          line
-        )
-      ) {
-
-        break;
-
-      }
-
-
-      if (
-        /^TTD APJ/i.test(
-          line
-        )
-      ) {
-
-        break;
-
-      }
-
-
-      // -------------------------------------------------
-      // CARI AWAL BARIS PRODUK
-      // -------------------------------------------------
-
-      const match =
-        line.match(
-          /^(\d+)\s+(\d{6,8})\s+(.+)$/
-        );
-
-
-      if (!match) {
-
-        continue;
-
-      }
-
-
-      const no =
-        match[1];
-
-
-      const sku =
-        match[2];
-
-
-      let product =
-        match[3].trim();
-
-
-      /*
-        Data berikutnya sering berada
-        pada baris yang sama atau
-        pecah menjadi beberapa item.
-      */
-
-      let combined =
-        product;
-
-
-      let j =
-        i + 1;
-
-
-      while (
-        j < lines.length
-      ) {
-
-        const next =
-          lines[j];
-
-
-        if (
-          /^\d+\s+\d{6,8}\s+/.test(
-            next
-          )
-        ) {
-
-          break;
-
-        }
-
-
-        if (
-          /^Total Qty Shipping/i.test(
-            next
-          )
-        ) {
-
-          break;
-
-        }
-
-
-        if (
-          /^TTD APJ/i.test(
-            next
-          )
-        ) {
-
-          break;
-
-        }
-
-
-        combined +=
-          " " +
-          next;
-
-
-        j++;
-
-      }
-
-
-      const parsed =
-        parseProductData(
-          combined
-        );
-
-
-      if (!parsed) {
-
-        continue;
-
-      }
-
-
-      rows.push({
-
-        no,
-
-        sku,
-
-        product:
-          parsed.product,
-
-        satuan:
-          parsed.satuan,
-
-        qty:
-          parsed.qty,
-
-        batch:
-          parsed.batch,
-
-        exp:
-          parsed.exp,
-
-        invoice:
-          parsed.invoice
-
-      });
-
-
-      i =
-        j - 1;
-
-    }
-
-  }
-
-
-  return rows;
-
-}
-
-
-// =========================================================
-// PARSE SATU PRODUK
-// =========================================================
-
-function parseProductData(
-  text
-) {
-
-  const cleaned =
-    text
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
-
-
-  /*
-    Bagian belakang PDF sumber:
-
-    ... BOX 20 2 EIK113 2027-11-01 58216245
-
-    atau:
-
-    ... TUBE 8 8 VF1516 2027-06-01 58216245
-  */
-
-
-  const match =
-    cleaned.match(
-      /^(.*?)\s+([A-Za-z]+)\s+(\d+)\s+(\d+)\s+([A-Za-z0-9-]+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)\s*$/
-    );
-
-
-  if (!match) {
-
-    return null;
-
-  }
-
-
-  return {
-
-    product:
-      match[1].trim(),
-
-    satuan:
-      match[2].trim(),
-
-    casePack:
-      match[3],
-
-    qty:
-      match[4],
-
-    batch:
-      match[5],
-
-    exp:
-      match[6],
-
-    invoice:
-      match[7]
-
-  };
-
-}
-
-
-// =========================================================
-// CARI AWAL TABLE
-// =========================================================
-
-function findTableStart(
-  lines
-) {
-
-  for (
-    let i = 0;
-    i < lines.length;
-    i++
-  ) {
-
-    const line =
-      lines[i].toLowerCase();
-
-
-    if (
-      line.includes("product sku") &&
-      line.includes("product description")
-    ) {
-
-      return i + 1;
-
-    }
-
-  }
-
-
-  return -1;
-
-}
-
-
-// =========================================================
-// NORMALIZE PDF TEXT
-// =========================================================
-
-function normalizePdfText(
-  text
-) {
-
-  return text
-
-    .replace(
-      /\u00a0/g,
-      " "
-    )
-
-    .split(/\r?\n/)
-
-    .map(
-      x =>
-        x
-          .replace(
-            /\s+/g,
-            " "
-          )
-          .trim()
-    )
-
-    .filter(
-      Boolean
-    );
-
-}
-
-
-// =========================================================
-// BUILD MEDICINE TABLE
-// =========================================================
-
-function buildMedicineTable(
-  rows
-) {
-
-  if (
-    !rows.length
-  ) {
-
-    return `
-
-      <table class="medicine-table">
-
-        <thead>
-          <tr>
-            <th>No</th>
-            <th>Nama Obat</th>
-            <th>Satuan</th>
-            <th>Zat Aktif</th>
-            <th>Bentuk</th>
-            <th>Jumlah</th>
-            <th>Keterangan</th>
-          </tr>
-        </thead>
-
-        <tbody>
-
-          <tr>
-
-            <td
-              colspan="7"
-              style="text-align:center;"
-            >
-              Tidak ada data obat yang ditemukan dari PDF sumber.
-            </td>
-
-          </tr>
-
-        </tbody>
-
-      </table>
-
-    `;
-
-  }
-
-
-  let html = `
-
-    <table class="medicine-table">
-
-      <thead>
-
-        <tr>
-
-          <th>No</th>
-
-          <th>Nama Obat</th>
-
-          <th>Satuan</th>
-
-          <th>Zat Aktif</th>
-
-          <th>Bentuk</th>
-
-          <th>Jumlah</th>
-
-          <th>Keterangan</th>
-
-        </tr>
-
-      </thead>
-
-      <tbody>
-
-  `;
-
-
-  for (
-    const row of rows
-  ) {
-
-    html += `
-
-      <tr>
-
-        <td>
-          ${escapeHtml(row.no)}
-        </td>
-
-        <td>
-          ${escapeHtml(row.product)}
-        </td>
-
-        <td>
-          ${escapeHtml(row.satuan)}
-        </td>
-
-        <td>
-          
-        </td>
-
-        <td>
-          
-        </td>
-
-        <td>
-          ${escapeHtml(row.qty)}
-        </td>
-
-        <td>
-          Batch: ${escapeHtml(row.batch)}
-          <br>
-          Exp: ${escapeHtml(row.exp)}
-          <br>
-          Invoice: ${escapeHtml(row.invoice)}
-        </td>
-
-      </tr>
-
-    `;
-
-  }
-
-
-  html += `
-
-      </tbody>
-
-    </table>
-
-  `;
-
-
-  return html;
-
-}
-
-
-// =========================================================
-// CSS PDF
+// TAMBAHKAN CSS PDF
 // =========================================================
 
 function addPdfCss(
@@ -1081,14 +464,6 @@ function addPdfCss(
 
         padding:
           0;
-
-      }
-
-
-      body {
-
-        box-sizing:
-          border-box;
 
       }
 
@@ -1271,14 +646,6 @@ function addPdfCss(
 
       }
 
-
-      tr {
-
-        page-break-inside:
-          avoid;
-
-      }
-
     </style>
 
   `;
@@ -1311,6 +678,7 @@ function normalizeImage(
     String(value).trim();
 
 
+  // Sudah data:image
   if (
     image.startsWith(
       "data:image/"
@@ -1322,6 +690,7 @@ function normalizeImage(
   }
 
 
+  // Format <img src="...">
   const match =
     image.match(
       /<img[^>]+src=["']([^"']+)["']/i
@@ -1335,6 +704,7 @@ function normalizeImage(
   }
 
 
+  // Base64 mentah
   image =
     image.replace(
       /\s/g,
@@ -1342,94 +712,47 @@ function normalizeImage(
     );
 
 
-  return `
-    data:image/png;base64,${image}
-  `;
+  return `data:image/png;base64,${image}`;
 
 }
 
 
 // =========================================================
-// CLEAN BASE64
+// HTML ESCAPE
 // =========================================================
 
-function cleanBase64(
+function escapeHtml(
   value
 ) {
 
-  if (!value) {
+  return String(
+    value ?? ""
+  )
 
-    return "";
+    .replace(
+      /&/g,
+      "&amp;"
+    )
 
-  }
+    .replace(
+      /</g,
+      "&lt;"
+    )
 
+    .replace(
+      />/g,
+      "&gt;"
+    )
 
-  let base64 =
-    String(value).trim();
+    .replace(
+      /"/g,
+      "&quot;"
+    )
 
-
-  const commaIndex =
-    base64.indexOf(",");
-
-
-  if (
-    base64.startsWith(
-      "data:"
-    ) &&
-    commaIndex !== -1
-  ) {
-
-    base64 =
-      base64.substring(
-        commaIndex + 1
-      );
-
-  }
-
-
-  base64 =
-    base64.replace(
-     (/\s/g),
-      ""
+    .replace(
+      /'/g,
+      "&#039;"
     );
-
-
-  return base64;
-
-}
-
-
-// =========================================================
-// BASE64 → BYTES
-// =========================================================
-
-function base64ToBytes(
-  base64
-) {
-
-  const binary =
-    atob(base64);
-
-
-  const bytes =
-    new Uint8Array(
-      binary.length
-    );
-
-
-  for (
-    let i = 0;
-    i < binary.length;
-    i++
-  ) {
-
-    bytes[i] =
-      binary.charCodeAt(i);
-
-  }
-
-
-  return bytes;
 
 }
 
@@ -1473,46 +796,6 @@ function bytesToBase64(
   return btoa(
     binary
   );
-
-}
-
-
-// =========================================================
-// HTML ESCAPE
-// =========================================================
-
-function escapeHtml(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-
-    .replace(
-      /</g,
-      "&lt;"
-    )
-
-    .replace(
-      />/g,
-      "&gt;"
-    )
-
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-
-    .replace(
-      /'/g,
-      "&#039;"
-    );
 
 }
 
