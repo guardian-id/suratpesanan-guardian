@@ -1,0 +1,4 @@
+name = "pdf-automation-worker"
+main = "index.js"
+compatibility_date = "2026-08-22"
+compatibility_flags = ["nodejs_compat"]
