@@ -5,14 +5,11 @@ const GITHUB_BASE =
 
 const TEMPLATE = {
   reguler:
-    GITHUB_BASE + "/Reguler.html",
+    `${GITHUB_BASE}/Reguler.html`,
 
   prekursor:
-    GITHUB_BASE + "/Prekursor.html"
+    `${GITHUB_BASE}/Prekursor.html`
 };
-
-const MASTER_PREKURSOR_URL =
-  GITHUB_BASE + "/master_prekursor.csv";
 
 
 export default {
@@ -31,11 +28,12 @@ export default {
           success: false,
           message: "Gunakan method POST."
         }, 405);
+
       }
 
 
       // =====================================================
-      // JSON
+      // JSON BODY
       // =====================================================
 
       const body =
@@ -44,38 +42,41 @@ export default {
 
       // =====================================================
       // TEMPLATE
-      //
-      // Reguler:
-      // Reguler
-      // Reguler.pdf
-      // reguler
-      //
-      // Prekursor:
-      // Prekursor
-      // Prekursor.pdf
       // =====================================================
 
-      const templateName =
-        detectTemplate(
-          body.template
-        );
-
-
-      // =====================================================
-      // PDF SOURCE
-      // =====================================================
-
-      const pdfBase64 =
+      const requestedTemplate =
         String(
-          body.pdfBase64 || ""
-        ).trim();
+          body.template || ""
+        )
+          .trim()
+          .toLowerCase();
 
 
-      if (!pdfBase64) {
+      let templateUrl;
+
+
+      if (
+        requestedTemplate ===
+        "reguler"
+      ) {
+
+        templateUrl =
+          TEMPLATE.reguler;
+
+      } else if (
+        requestedTemplate ===
+        "prekursor"
+      ) {
+
+        templateUrl =
+          TEMPLATE.prekursor;
+
+      } else {
 
         throw new Error(
-          "pdfBase64 tidak ditemukan."
+          `Template tidak valid: "${body.template}". Gunakan Reguler atau Prekursor.`
         );
+
       }
 
 
@@ -85,20 +86,20 @@ export default {
 
       const templateResponse =
         await fetch(
-          TEMPLATE[templateName]
+          templateUrl
         );
 
 
       if (!templateResponse.ok) {
 
         throw new Error(
-          "Template GitHub gagal diambil. HTTP " +
-          templateResponse.status
+          `Template GitHub gagal diambil. HTTP ${templateResponse.status}`
         );
+
       }
 
 
-      const templateHtml =
+      let html =
         await templateResponse.text();
 
 
@@ -124,10 +125,6 @@ export default {
       ];
 
 
-      let baseHtml =
-        templateHtml;
-
-
       for (
         const field of fields
       ) {
@@ -136,8 +133,8 @@ export default {
           body[field] ?? "";
 
 
-        baseHtml =
-          baseHtml
+        html =
+          html
             .split(
               `{{${field}}}`
             )
@@ -146,7 +143,152 @@ export default {
                 String(value)
               )
             );
+
       }
+
+
+      // =====================================================
+      // PDF SUMBER
+      // =====================================================
+
+      const sourcePdfBase64 =
+        cleanBase64(
+          body.pdfBase64
+        );
+
+
+      if (!sourcePdfBase64) {
+
+        throw new Error(
+          "pdfBase64 tidak ditemukan. Power Automate harus mengirim PDF sumber."
+        );
+
+      }
+
+
+      // =====================================================
+      // PDF BASE64 → BINARY
+      // =====================================================
+
+      const sourcePdfBytes =
+        base64ToBytes(
+          sourcePdfBase64
+        );
+
+
+      // =====================================================
+      // BACA PDF DENGAN PDF.JS
+      // =====================================================
+
+      const pdfDocument =
+        await getDocument({
+
+          data:
+            sourcePdfBytes,
+
+          useSystemFonts:
+            true
+
+        }).promise;
+
+
+      const totalSourcePages =
+        pdfDocument.numPages;
+
+
+      if (
+        !totalSourcePages ||
+        totalSourcePages < 1
+      ) {
+
+        throw new Error(
+          "PDF sumber tidak mempunyai halaman."
+        );
+
+      }
+
+
+      // =====================================================
+      // EXTRACT TEXT PER HALAMAN
+      // =====================================================
+
+      const pages = [];
+
+
+      for (
+        let pageNumber = 1;
+        pageNumber <= totalSourcePages;
+        pageNumber++
+      ) {
+
+        const page =
+          await pdfDocument.getPage(
+            pageNumber
+          );
+
+
+        const textContent =
+          await page.getTextContent();
+
+
+        const items =
+          textContent.items || [];
+
+
+        const text =
+          items
+            .map(
+              item =>
+                String(
+                  item.str || ""
+                )
+            )
+            .join(" ");
+
+
+        pages.push({
+
+          pageNumber,
+
+          text
+
+        });
+
+      }
+
+
+      // =====================================================
+      // PARSE DATA TABEL
+      // =====================================================
+
+      const tableRows =
+        parseSourceTable(
+          pages
+        );
+
+
+      // =====================================================
+      // BUAT TABLE HTML
+      // =====================================================
+
+      const tableHtml =
+        buildMedicineTable(
+          tableRows
+        );
+
+
+      // =====================================================
+      // TABLE
+      // =====================================================
+
+      html =
+        html
+          .split(
+            "{{TablePDF}}"
+          )
+          .join(
+            tableHtml
+          );
 
 
       // =====================================================
@@ -203,11 +345,12 @@ export default {
           </div>
 
         `;
+
       }
 
 
-      baseHtml =
-        baseHtml
+      html =
+        html
           .split(
             "{{TTD&Stemp}}"
           )
@@ -217,131 +360,18 @@ export default {
 
 
       // =====================================================
-      // PDF SOURCE → TEXT
+      // HAPUS PLACEHOLDER YANG TERSISA
       // =====================================================
 
-      const pdfBytes =
-        base64ToUint8Array(
-          pdfBase64
-        );
-
-
-      const pdfData =
-        await extractPdfText(
-          pdfBytes
+      html =
+        html.replace(
+          /\{\{[^{}]+\}\}/g,
+          ""
         );
 
 
       // =====================================================
-      // MASTER PREKURSOR
-      // =====================================================
-
-      let masterPrekursor =
-        [];
-
-
-      if (
-        templateName ===
-        "prekursor"
-      ) {
-
-        masterPrekursor =
-          await loadPrekursorMaster();
-      }
-
-
-      // =====================================================
-      // PARSE PRODUCT PER HALAMAN
-      // =====================================================
-
-      const pageProducts =
-        parseProductsByPage(
-          pdfData
-        );
-
-
-      if (
-        !pageProducts.length
-      ) {
-
-        throw new Error(
-          "Tidak ditemukan data produk pada PDF sumber."
-        );
-      }
-
-
-      // =====================================================
-      // BUAT HTML UNTUK SETIAP HALAMAN
-      //
-      // PDF sumber 6 halaman
-      // → template 6 halaman
-      // =====================================================
-
-      const pageHtml = [];
-
-
-      for (
-        let pageIndex = 0;
-        pageIndex < pageProducts.length;
-        pageIndex++
-      ) {
-
-        const products =
-          pageProducts[
-            pageIndex
-          ];
-
-
-        const tableHtml =
-          buildMedicineTable(
-            products,
-            templateName,
-            masterPrekursor
-          );
-
-
-        let page =
-          baseHtml
-            .split(
-              "{{TablePDF}}"
-            )
-            .join(
-              tableHtml
-            );
-
-
-        // Hilangkan placeholder lainnya
-        page =
-          page.replace(
-            /\{\{[^{}]+\}\}/g,
-            ""
-          );
-
-
-        // Pastikan setiap halaman
-        // menjadi halaman A4 sendiri
-        page =
-          wrapPage(
-            page
-          );
-
-
-        pageHtml.push(
-          page
-        );
-      }
-
-
-      // =====================================================
-      // GABUNG SEMUA HALAMAN
-      // =====================================================
-
-      let html =
-        pageHtml.join("\n");
-
-
-      // =====================================================
-      // CSS PDF
+      // TAMBAHKAN CSS
       // =====================================================
 
       html =
@@ -351,7 +381,7 @@ export default {
 
 
       // =====================================================
-      // BROWSER
+      // BROWSER CHECK
       // =====================================================
 
       if (!env.BROWSER) {
@@ -359,6 +389,7 @@ export default {
         throw new Error(
           "Binding BROWSER belum tersedia di Cloudflare Worker."
         );
+
       }
 
 
@@ -371,22 +402,35 @@ export default {
           "pdf",
           {
 
-            html: html,
+            html,
 
             pdfOptions: {
 
-              format: "a4",
+              format:
+                "a4",
 
-              printBackground: true,
+              landscape:
+                false,
 
-              preferCSSPageSize: true,
+              printBackground:
+                true,
+
+              preferCSSPageSize:
+                true,
 
               margin: {
 
-                top: "0",
-                right: "0",
-                bottom: "0",
-                left: "0"
+                top:
+                  "0",
+
+                right:
+                  "0",
+
+                bottom:
+                  "0",
+
+                left:
+                  "0"
 
               }
 
@@ -403,17 +447,17 @@ export default {
 
 
         throw new Error(
-          "HTML → PDF gagal: " +
-          error
+          `HTML → PDF gagal: ${error}`
         );
+
       }
 
 
       // =====================================================
-      // PDF → BASE64
+      // PDF BINARY → BASE64
       // =====================================================
 
-      const finalPdfBytes =
+      const pdfBytes =
         new Uint8Array(
           await pdf.arrayBuffer()
         );
@@ -421,7 +465,7 @@ export default {
 
       const spBase64 =
         bytesToBase64(
-          finalPdfBytes
+          pdfBytes
         );
 
 
@@ -431,33 +475,24 @@ export default {
 
       return response({
 
-        success: true,
+        success:
+          true,
 
         message:
           "PDF berhasil dibuat.",
 
         template:
-          templateName ===
-          "prekursor"
-            ? "Prekursor"
-            : "Reguler",
+          requestedTemplate === "reguler"
+            ? "Reguler"
+            : "Prekursor",
 
-        sourcePageCount:
-          pageProducts.length,
+        sourcePages:
+          totalSourcePages,
 
-        productCount:
-          pageProducts.reduce(
-            (
-              total,
-              page
-            ) =>
-              total +
-              page.length,
-            0
-          ),
+        tableRows:
+          tableRows.length,
 
-        spBase64:
-          spBase64
+        spBase64
 
       });
 
@@ -466,320 +501,279 @@ export default {
 
       return response({
 
-        success: false,
+        success:
+          false,
 
         message:
           error?.message ||
           "Terjadi error."
 
       }, 500);
+
     }
+
   }
+
 };
 
 
 // =========================================================
-// DETECT TEMPLATE
+// PARSE TABLE DARI PDF SUMBER
 // =========================================================
 
-function detectTemplate(
-  value
+function parseSourceTable(
+  pages
 ) {
 
-  const name =
-    String(
-      value || "Reguler"
-    )
-      .trim()
-      .toLowerCase();
-
-
-  // Hanya kalau mengandung prekursor
-  // dianggap Prekursor
-
-  if (
-    name.includes(
-      "prekursor"
-    )
-  ) {
-
-    return "prekursor";
-  }
-
-
-  // Selain itu Reguler
-
-  return "reguler";
-}
-
-
-// =========================================================
-// WRAP PAGE
-// =========================================================
-
-function wrapPage(
-  html
-) {
-
-  return `
-
-    <div class="pdf-page">
-
-      ${html}
-
-    </div>
-
-  `;
-}
-
-
-// =========================================================
-// PDF TEXT EXTRACTION
-// =========================================================
-
-async function extractPdfText(
-  pdfBytes
-) {
-
-  const loadingTask =
-    getDocument({
-
-      data: pdfBytes,
-
-      useSystemFonts: true
-
-    });
-
-
-  const document =
-    await loadingTask.promise;
-
-
-  const pages = [];
+  const rows = [];
 
 
   for (
-    let pageNumber = 1;
-    pageNumber <=
-    document.numPages;
-    pageNumber++
+    const page of pages
   ) {
 
-    const page =
-      await document.getPage(
-        pageNumber
-      );
-
-
-    const textContent =
-      await page.getTextContent();
-
-
-    const items =
-      textContent.items
-        .filter(
-          item =>
-            typeof item.str ===
-              "string" &&
-            item.str.trim() !== ""
-        )
-        .map(
-          item => ({
-
-            text:
-              item.str.trim(),
-
-            x:
-              item.transform
-                ? item.transform[4]
-                : 0,
-
-            y:
-              item.transform
-                ? item.transform[5]
-                : 0
-
-          })
-        );
-
-
-    const lines =
-      groupTextItemsIntoLines(
-        items
-      );
-
-
-    pages.push({
-
-      pageNumber,
-
-      lines
-
-    });
-  }
-
-
-  return {
-
-    pageCount:
-      document.numPages,
-
-    pages
-
-  };
-}
-
-
-// =========================================================
-// GROUP TEXT INTO LINES
-// =========================================================
-
-function groupTextItemsIntoLines(
-  items
-) {
-
-  const groups = [];
-
-  const tolerance = 3;
-
-
-  for (
-    const item of items
-  ) {
-
-    let group =
-      groups.find(
-        g =>
-          Math.abs(
-            g.y -
-            item.y
-          ) <= tolerance
-      );
-
-
-    if (!group) {
-
-      group = {
-
-        y:
-          item.y,
-
-        items: []
-
-      };
-
-
-      groups.push(
-        group
-      );
-    }
-
-
-    group.items.push(
-      item
-    );
-  }
-
-
-  groups.sort(
-    (a, b) =>
-      b.y - a.y
-  );
-
-
-  return groups.map(
-    group => {
-
-      group.items.sort(
-        (a, b) =>
-          a.x - b.x
-      );
-
-
-      return group.items
-        .map(
-          item =>
-            item.text
-        )
-        .join(" ")
-        .replace(
-          /\s+/g,
-          " "
-        )
-        .trim();
-
-    }
-  );
-}
-
-
-// =========================================================
-// PARSE PRODUCTS PER PAGE
-// =========================================================
-
-function parseProductsByPage(
-  pdfData
-) {
-
-  const result = [];
-
-
-  for (
-    const page of pdfData.pages
-  ) {
-
-    const products = [];
-
-
-    for (
-      const line of page.lines
-    ) {
-
-      const product =
-        parseProductLine(
-          line
-        );
-
-
-      if (product) {
-
-        products.push(
-          product
-        );
-      }
-    }
+    const text =
+      page.text || "";
 
 
     /*
-      Hanya halaman yang memiliki
-      data produk yang dimasukkan.
+      Format sumber:
+
+      No
+      Product SKU
+      Product Description
+      Kemasan
+      Case Pack
+      Qty
+      Shipping
+      Batch Number
+      Expired Date
+      Invoice No
+
+      Contoh:
+
+      1 3102695
+      ACETYLSISTEINE CAPSULE200MG 1S NOVELL
+      BOX 20 2 EIK113 2027-11-01 58216245
     */
 
+
+    const lines =
+      normalizePdfText(
+        text
+      );
+
+
+    let startIndex =
+      findTableStart(
+        lines
+      );
+
+
     if (
-      products.length > 0
+      startIndex === -1
     ) {
 
-      result.push(
-        products
-      );
+      continue;
+
     }
+
+
+    for (
+      let i =
+        startIndex;
+      i <
+        lines.length;
+      i++
+    ) {
+
+      const line =
+        lines[i];
+
+
+      // -------------------------------------------------
+      // STOP
+      // -------------------------------------------------
+
+      if (
+        /^Total Qty Shipping/i.test(
+          line
+        )
+      ) {
+
+        break;
+
+      }
+
+
+      if (
+        /^TTD APJ/i.test(
+          line
+        )
+      ) {
+
+        break;
+
+      }
+
+
+      // -------------------------------------------------
+      // CARI AWAL BARIS PRODUK
+      // -------------------------------------------------
+
+      const match =
+        line.match(
+          /^(\d+)\s+(\d{6,8})\s+(.+)$/
+        );
+
+
+      if (!match) {
+
+        continue;
+
+      }
+
+
+      const no =
+        match[1];
+
+
+      const sku =
+        match[2];
+
+
+      let product =
+        match[3].trim();
+
+
+      /*
+        Data berikutnya sering berada
+        pada baris yang sama atau
+        pecah menjadi beberapa item.
+      */
+
+      let combined =
+        product;
+
+
+      let j =
+        i + 1;
+
+
+      while (
+        j < lines.length
+      ) {
+
+        const next =
+          lines[j];
+
+
+        if (
+          /^\d+\s+\d{6,8}\s+/.test(
+            next
+          )
+        ) {
+
+          break;
+
+        }
+
+
+        if (
+          /^Total Qty Shipping/i.test(
+            next
+          )
+        ) {
+
+          break;
+
+        }
+
+
+        if (
+          /^TTD APJ/i.test(
+            next
+          )
+        ) {
+
+          break;
+
+        }
+
+
+        combined +=
+          " " +
+          next;
+
+
+        j++;
+
+      }
+
+
+      const parsed =
+        parseProductData(
+          combined
+        );
+
+
+      if (!parsed) {
+
+        continue;
+
+      }
+
+
+      rows.push({
+
+        no,
+
+        sku,
+
+        product:
+          parsed.product,
+
+        satuan:
+          parsed.satuan,
+
+        qty:
+          parsed.qty,
+
+        batch:
+          parsed.batch,
+
+        exp:
+          parsed.exp,
+
+        invoice:
+          parsed.invoice
+
+      });
+
+
+      i =
+        j - 1;
+
+    }
+
   }
 
 
-  return result;
+  return rows;
+
 }
 
 
 // =========================================================
-// PARSE PRODUCT LINE
+// PARSE SATU PRODUK
 // =========================================================
 
-function parseProductLine(
-  line
+function parseProductData(
+  text
 ) {
 
-  const text =
-    String(line)
+  const cleaned =
+    text
       .replace(
         /\s+/g,
         " "
@@ -788,98 +782,123 @@ function parseProductLine(
 
 
   /*
-    Contoh:
+    Bagian belakang PDF sumber:
 
-    1 3102695
-    ACETYLSISTEINE...
-    BOX 20 2 EIK113
-    2027-11-01 58216245
+    ... BOX 20 2 EIK113 2027-11-01 58216245
+
+    atau:
+
+    ... TUBE 8 8 VF1516 2027-06-01 58216245
   */
 
-  const startMatch =
-    text.match(
-      /^(\d+)\s+(\d{5,})\s+(.+)$/
+
+  const match =
+    cleaned.match(
+      /^(.*?)\s+([A-Za-z]+)\s+(\d+)\s+(\d+)\s+([A-Za-z0-9-]+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)\s*$/
     );
 
 
-  if (!startMatch) {
+  if (!match) {
 
     return null;
-  }
 
-
-  const no =
-    startMatch[1];
-
-  const sku =
-    startMatch[2];
-
-  const rest =
-    startMatch[3].trim();
-
-
-  /*
-    Dari belakang:
-
-    invoice
-    expired
-    batch
-    qty
-    case pack
-    kemasan
-  */
-
-  const endMatch =
-    rest.match(
-      /^(.+?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
-    );
-
-
-  if (!endMatch) {
-
-    return null;
   }
 
 
   return {
 
-    no:
+    product:
+      match[1].trim(),
 
-      no,
-
-    sku:
-
-      sku,
-
-    description:
-
-      endMatch[1].trim(),
-
-    kemasan:
-
-      endMatch[2].trim(),
+    satuan:
+      match[2].trim(),
 
     casePack:
-
-      endMatch[3].trim(),
+      match[3],
 
     qty:
-
-      endMatch[4].trim(),
+      match[4],
 
     batch:
+      match[5],
 
-      endMatch[5].trim(),
-
-    expiredDate:
-
-      endMatch[6].trim(),
+    exp:
+      match[6],
 
     invoice:
-
-      endMatch[7].trim()
+      match[7]
 
   };
+
+}
+
+
+// =========================================================
+// CARI AWAL TABLE
+// =========================================================
+
+function findTableStart(
+  lines
+) {
+
+  for (
+    let i = 0;
+    i < lines.length;
+    i++
+  ) {
+
+    const line =
+      lines[i].toLowerCase();
+
+
+    if (
+      line.includes("product sku") &&
+      line.includes("product description")
+    ) {
+
+      return i + 1;
+
+    }
+
+  }
+
+
+  return -1;
+
+}
+
+
+// =========================================================
+// NORMALIZE PDF TEXT
+// =========================================================
+
+function normalizePdfText(
+  text
+) {
+
+  return text
+
+    .replace(
+      /\u00a0/g,
+      " "
+    )
+
+    .split(/\r?\n/)
+
+    .map(
+      x =>
+        x
+          .replace(
+            /\s+/g,
+            " "
+          )
+          .trim()
+    )
+
+    .filter(
+      Boolean
+    );
+
 }
 
 
@@ -888,132 +907,52 @@ function parseProductLine(
 // =========================================================
 
 function buildMedicineTable(
-  products,
-  templateName,
-  masterPrekursor
+  rows
 ) {
 
-  let rows = "";
-
-
-  for (
-    const product of products
+  if (
+    !rows.length
   ) {
 
-    let zatAktif = "";
+    return `
 
-    let bentuk = "";
+      <table class="medicine-table">
 
+        <thead>
+          <tr>
+            <th>No</th>
+            <th>Nama Obat</th>
+            <th>Satuan</th>
+            <th>Zat Aktif</th>
+            <th>Bentuk</th>
+            <th>Jumlah</th>
+            <th>Keterangan</th>
+          </tr>
+        </thead>
 
-    // ===================================================
-    // PREKURSOR LOOKUP
-    // ===================================================
+        <tbody>
 
-    if (
-      templateName ===
-      "prekursor"
-    ) {
+          <tr>
 
-      const master =
-        masterPrekursor.find(
-          row =>
-            normalizeSku(
-              row.SKU
-            ) ===
-            normalizeSku(
-              product.sku
-            )
-        );
+            <td
+              colspan="7"
+              style="text-align:center;"
+            >
+              Tidak ada data obat yang ditemukan dari PDF sumber.
+            </td>
 
+          </tr>
 
-      if (master) {
+        </tbody>
 
-        zatAktif =
-          getMasterValue(
-            master,
-            [
-              "Zat Aktif",
-              "ZatAktif",
-              "ZAT AKTIF",
-              "zat_aktif"
-            ]
-          );
-
-
-        bentuk =
-          getMasterValue(
-            master,
-            [
-              "Bentuk",
-              "BENTUK",
-              "bentuk"
-            ]
-          );
-      }
-    }
-
-
-    /*
-      KETERANGAN SEKARANG HANYA INVOICE
-    */
-
-    const keterangan =
-      escapeHtml(
-        product.invoice
-      );
-
-
-    rows += `
-
-      <tr>
-
-        <td>
-          ${escapeHtml(
-            product.no
-          )}
-        </td>
-
-        <td>
-          ${escapeHtml(
-            product.description
-          )}
-        </td>
-
-        <td>
-          ${escapeHtml(
-            product.kemasan
-          )}
-        </td>
-
-        <td>
-          ${escapeHtml(
-            zatAktif
-          )}
-        </td>
-
-        <td>
-          ${escapeHtml(
-            bentuk
-          )}
-        </td>
-
-        <td>
-          ${escapeHtml(
-            product.qty
-          )}
-        </td>
-
-        <td>
-          ${keterangan}
-        </td>
-
-      </tr>
+      </table>
 
     `;
+
   }
 
 
-  return `
+  let html = `
 
     <table class="medicine-table">
 
@@ -1041,244 +980,315 @@ function buildMedicineTable(
 
       <tbody>
 
-        ${rows}
+  `;
+
+
+  for (
+    const row of rows
+  ) {
+
+    html += `
+
+      <tr>
+
+        <td>
+          ${escapeHtml(row.no)}
+        </td>
+
+        <td>
+          ${escapeHtml(row.product)}
+        </td>
+
+        <td>
+          ${escapeHtml(row.satuan)}
+        </td>
+
+        <td>
+          
+        </td>
+
+        <td>
+          
+        </td>
+
+        <td>
+          ${escapeHtml(row.qty)}
+        </td>
+
+        <td>
+          Batch: ${escapeHtml(row.batch)}
+          <br>
+          Exp: ${escapeHtml(row.exp)}
+          <br>
+          Invoice: ${escapeHtml(row.invoice)}
+        </td>
+
+      </tr>
+
+    `;
+
+  }
+
+
+  html += `
 
       </tbody>
 
     </table>
 
   `;
+
+
+  return html;
+
 }
 
 
 // =========================================================
-// MASTER PREKURSOR
+// CSS PDF
 // =========================================================
 
-async function loadPrekursorMaster() {
-
-  const response =
-    await fetch(
-      MASTER_PREKURSOR_URL
-    );
-
-
-  if (!response.ok) {
-
-    throw new Error(
-      "master_prekursor.csv gagal diambil. HTTP " +
-      response.status
-    );
-  }
-
-
-  const csv =
-    await response.text();
-
-
-  return parseCsv(
-    csv
-  );
-}
-
-
-// =========================================================
-// CSV PARSER
-// =========================================================
-
-function parseCsv(
-  csv
+function addPdfCss(
+  html
 ) {
 
-  const lines =
-    String(csv)
-      .split(
-        /\r?\n/
-      )
-      .filter(
-        line =>
-          line.trim() !== ""
-      );
+  const css = `
 
+    <style>
 
-  if (
-    lines.length < 2
-  ) {
+      @page {
 
-    return [];
-  }
+        size:
+          A4 portrait;
 
+        margin:
+          0;
 
-  const headers =
-    parseCsvLine(
-      lines[0]
-    ).map(
-      header =>
-        header.trim()
-    );
-
-
-  const result = [];
-
-
-  for (
-    let i = 1;
-    i < lines.length;
-    i++
-  ) {
-
-    const columns =
-      parseCsvLine(
-        lines[i]
-      );
-
-
-    const row = {};
-
-
-    for (
-      let j = 0;
-      j < headers.length;
-      j++
-    ) {
-
-      row[
-        headers[j]
-      ] =
-        columns[j] ??
-        "";
-    }
-
-
-    result.push(
-      row
-    );
-  }
-
-
-  return result;
-}
-
-
-// =========================================================
-// CSV LINE
-// =========================================================
-
-function parseCsvLine(
-  line
-) {
-
-  const result = [];
-
-  let current = "";
-
-  let quoted =
-    false;
-
-
-  for (
-    let i = 0;
-    i < line.length;
-    i++
-  ) {
-
-    const char =
-      line[i];
-
-
-    if (
-      char === '"'
-    ) {
-
-      if (
-        quoted &&
-        line[i + 1] === '"'
-      ) {
-
-        current += '"';
-
-        i++;
-
-      } else {
-
-        quoted =
-          !quoted;
       }
 
-    } else if (
-      char === "," &&
-      !quoted
-    ) {
 
-      result.push(
-        current.trim()
-      );
+      html,
+      body {
 
-      current = "";
+        width:
+          210mm;
 
-    } else {
+        min-height:
+          297mm;
 
-      current += char;
-    }
-  }
+        margin:
+          0;
+
+        padding:
+          0;
+
+      }
 
 
-  result.push(
-    current.trim()
+      body {
+
+        box-sizing:
+          border-box;
+
+      }
+
+
+      .a4-container {
+
+        width:
+          210mm;
+
+        min-height:
+          297mm;
+
+        box-sizing:
+          border-box;
+
+        page-break-after:
+          always;
+
+      }
+
+
+      table {
+
+        width:
+          100%;
+
+        border-collapse:
+          collapse;
+
+      }
+
+
+      table th,
+      table td {
+
+        border:
+          1px solid #000;
+
+        padding:
+          4px;
+
+        vertical-align:
+          top;
+
+      }
+
+
+      .medicine-table {
+
+        width:
+          100%;
+
+        table-layout:
+          fixed;
+
+        font-size:
+          9px;
+
+      }
+
+
+      .medicine-table th:nth-child(1) {
+
+        width:
+          6%;
+
+      }
+
+
+      .medicine-table th:nth-child(2) {
+
+        width:
+          25%;
+
+      }
+
+
+      .medicine-table th:nth-child(3) {
+
+        width:
+          10%;
+
+      }
+
+
+      .medicine-table th:nth-child(4) {
+
+        width:
+          19%;
+
+      }
+
+
+      .medicine-table th:nth-child(5) {
+
+        width:
+          12%;
+
+      }
+
+
+      .medicine-table th:nth-child(6) {
+
+        width:
+          8%;
+
+      }
+
+
+      .medicine-table th:nth-child(7) {
+
+        width:
+          20%;
+
+      }
+
+
+      .signature-container {
+
+        position:
+          relative;
+
+        width:
+          150px;
+
+        height:
+          100px;
+
+      }
+
+
+      .signature-container .stamp {
+
+        position:
+          absolute;
+
+        left:
+          40px;
+
+        top:
+          15px;
+
+        width:
+          85px;
+
+        height:
+          85px;
+
+        object-fit:
+          contain;
+
+        z-index:
+          1;
+
+      }
+
+
+      .signature-container .signature {
+
+        position:
+          absolute;
+
+        left:
+          0;
+
+        top:
+          0;
+
+        width:
+          105px;
+
+        height:
+          60px;
+
+        object-fit:
+          contain;
+
+        z-index:
+          2;
+
+      }
+
+
+      tr {
+
+        page-break-inside:
+          avoid;
+
+      }
+
+    </style>
+
+  `;
+
+
+  return html.replace(
+    "</head>",
+    `${css}</head>`
   );
 
-
-  return result;
-}
-
-
-// =========================================================
-// SKU NORMALIZER
-// =========================================================
-
-function normalizeSku(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-    .trim()
-    .replace(
-      /\.0$/,
-      ""
-    );
-}
-
-
-// =========================================================
-// MASTER VALUE
-// =========================================================
-
-function getMasterValue(
-  row,
-  possibleNames
-) {
-
-  for (
-    const name of
-    possibleNames
-  ) {
-
-    if (
-      row[name] !==
-      undefined
-    ) {
-
-      return String(
-        row[name] ??
-        ""
-      ).trim();
-    }
-  }
-
-
-  return "";
 }
 
 
@@ -1293,6 +1303,7 @@ function normalizeImage(
   if (!value) {
 
     return "";
+
   }
 
 
@@ -1307,6 +1318,7 @@ function normalizeImage(
   ) {
 
     return image;
+
   }
 
 
@@ -1319,6 +1331,7 @@ function normalizeImage(
   if (match) {
 
     return match[1];
+
   }
 
 
@@ -1329,59 +1342,73 @@ function normalizeImage(
     );
 
 
-  return (
-    "data:image/png;base64," +
-    image
-  );
+  return `
+    data:image/png;base64,${image}
+  `;
+
 }
 
 
 // =========================================================
-// BASE64 → UINT8 ARRAY
+// CLEAN BASE64
 // =========================================================
 
-function base64ToUint8Array(
+function cleanBase64(
   value
 ) {
 
+  if (!value) {
+
+    return "";
+
+  }
+
+
   let base64 =
-    String(value)
-      .trim();
+    String(value).trim();
+
+
+  const commaIndex =
+    base64.indexOf(",");
 
 
   if (
     base64.startsWith(
       "data:"
-    )
+    ) &&
+    commaIndex !== -1
   ) {
 
-    const comma =
-      base64.indexOf(",");
+    base64 =
+      base64.substring(
+        commaIndex + 1
+      );
 
-
-    if (
-      comma !== -1
-    ) {
-
-      base64 =
-        base64.slice(
-          comma + 1
-        );
-    }
   }
 
 
   base64 =
     base64.replace(
-      /\s/g,
+     (/\s/g),
       ""
     );
 
 
+  return base64;
+
+}
+
+
+// =========================================================
+// BASE64 → BYTES
+// =========================================================
+
+function base64ToBytes(
+  base64
+) {
+
   const binary =
-    atob(
-      base64
-    );
+    atob(base64);
 
 
   const bytes =
@@ -1398,241 +1425,12 @@ function base64ToUint8Array(
 
     bytes[i] =
       binary.charCodeAt(i);
+
   }
 
 
   return bytes;
-}
 
-
-// =========================================================
-// HTML ESCAPE
-// =========================================================
-
-function escapeHtml(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-    .replace(
-      /</g,
-      "&lt;"
-    )
-    .replace(
-      />/g,
-      "&gt;"
-    )
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-    .replace(
-      /'/g,
-      "&#039;"
-    );
-}
-
-
-// =========================================================
-// PDF CSS
-// =========================================================
-
-function addPdfCss(
-  html
-) {
-
-  const css = `
-
-    <style>
-
-      @page {
-
-        size: A4 portrait;
-
-        margin: 0;
-
-      }
-
-
-      html,
-      body {
-
-        margin: 0;
-
-        padding: 0;
-
-      }
-
-
-      .pdf-page {
-
-        position: relative;
-
-        width: 210mm;
-
-        height: 297mm;
-
-        box-sizing: border-box;
-
-        page-break-after: always;
-
-        overflow: hidden;
-
-      }
-
-
-      .pdf-page:last-child {
-
-        page-break-after: auto;
-
-      }
-
-
-      table {
-
-        width: 100%;
-
-        border-collapse: collapse;
-
-      }
-
-
-      table th,
-      table td {
-
-        border: 1px solid #000;
-
-        padding: 4px;
-
-        vertical-align: top;
-
-      }
-
-
-      .medicine-table {
-
-        width: 100%;
-
-        table-layout: fixed;
-
-        font-size: 9px;
-
-      }
-
-
-      .medicine-table th:nth-child(1) {
-
-        width: 6%;
-
-      }
-
-
-      .medicine-table th:nth-child(2) {
-
-        width: 25%;
-
-      }
-
-
-      .medicine-table th:nth-child(3) {
-
-        width: 10%;
-
-      }
-
-
-      .medicine-table th:nth-child(4) {
-
-        width: 19%;
-
-      }
-
-
-      .medicine-table th:nth-child(5) {
-
-        width: 12%;
-
-      }
-
-
-      .medicine-table th:nth-child(6) {
-
-        width: 8%;
-
-      }
-
-
-      .medicine-table th:nth-child(7) {
-
-        width: 20%;
-
-      }
-
-
-      .signature-container {
-
-        position: relative;
-
-        width: 150px;
-
-        height: 100px;
-
-      }
-
-
-      .signature-container .stamp {
-
-        position: absolute;
-
-        left: 40px;
-
-        top: 15px;
-
-        width: 85px;
-
-        height: 85px;
-
-        object-fit: contain;
-
-        z-index: 1;
-
-      }
-
-
-      .signature-container .signature {
-
-        position: absolute;
-
-        left: 0;
-
-        top: 0;
-
-        width: 105px;
-
-        height: 60px;
-
-        object-fit: contain;
-
-        z-index: 2;
-
-      }
-
-    </style>
-
-  `;
-
-
-  return html.replace(
-    "</head>",
-    css +
-    "</head>"
-  );
 }
 
 
@@ -1644,7 +1442,9 @@ function bytesToBase64(
   bytes
 ) {
 
-  let binary = "";
+  let binary =
+    "";
+
 
   const chunk =
     0x8000;
@@ -1666,12 +1466,54 @@ function bytesToBase64(
           )
         )
       );
+
   }
 
 
   return btoa(
     binary
   );
+
+}
+
+
+// =========================================================
+// HTML ESCAPE
+// =========================================================
+
+function escapeHtml(
+  value
+) {
+
+  return String(
+    value ?? ""
+  )
+
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+
+    .replace(
+      /</g,
+      "&lt;"
+    )
+
+    .replace(
+      />/g,
+      "&gt;"
+    )
+
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
 }
 
 
@@ -1685,9 +1527,11 @@ function response(
 ) {
 
   return new Response(
+
     JSON.stringify(
       data
     ),
+
     {
 
       status,
@@ -1700,5 +1544,7 @@ function response(
       }
 
     }
+
   );
+
 }
