@@ -1,66 +1,81 @@
+```javascript
 import puppeteer from "@cloudflare/puppeteer";
 
-const GITHUB_RAW_BASE =
-  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
-const REGULER_TEMPLATE_URL =
-  GITHUB_RAW_BASE + "/Reguler.html";
+// ============================================================
+// GITHUB FILES
+// ============================================================
 
-const PREKURSOR_TEMPLATE_URL =
-  GITHUB_RAW_BASE + "/Prekursor.html";
+const REGULER_HTML_URL =
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.html";
+
+const PREKURSOR_HTML_URL =
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Prekursor.html";
 
 const MASTER_PREKURSOR_URL =
-  GITHUB_RAW_BASE + "/master_prekursor.csv";
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/master_prekursor.csv";
 
+
+// ============================================================
+// WORKER
+// ============================================================
 
 export default {
+
   async fetch(request, env, ctx) {
 
-    // =====================================================
+    // ========================================================
     // GET - HEALTH CHECK
-    // =====================================================
+    // ========================================================
 
     if (request.method === "GET") {
+
       return jsonResponse({
         success: true,
         message: "SP GUARDIAN WORKER OK",
         worker: "suratpesanan-guardian",
-        version: "FINAL-HTML-1"
+        version: "FINAL-HTML-2026-08-22"
       });
+
     }
 
 
-    // =====================================================
+    // ========================================================
     // ONLY POST
-    // =====================================================
+    // ========================================================
 
     if (request.method !== "POST") {
+
       return jsonResponse({
         success: false,
         error: "Method not allowed"
       }, 405);
+
     }
 
 
     try {
 
-      // ===================================================
+      // ======================================================
       // READ JSON
-      // ===================================================
+      // ======================================================
 
       const body = await request.json();
 
+
       if (!body || typeof body !== "object") {
+
         return jsonResponse({
           success: false,
-          error: "Invalid request body"
+          error: "Invalid JSON body"
         }, 400);
+
       }
 
 
-      // ===================================================
+      // ======================================================
       // TEMPLATE
-      // ===================================================
+      // ======================================================
 
       const template =
         String(body.template || "Reguler")
@@ -68,41 +83,56 @@ export default {
           .toLowerCase();
 
 
-      let templateUrl = REGULER_TEMPLATE_URL;
       let templateName = "Reguler";
+
+      let templateUrl = REGULER_HTML_URL;
 
 
       if (template === "prekursor") {
-        templateUrl = PREKURSOR_TEMPLATE_URL;
+
         templateName = "Prekursor";
+
+        templateUrl = PREKURSOR_HTML_URL;
+
       }
 
 
-      // ===================================================
-      // DATA
-      // ===================================================
+      // ======================================================
+      // DATA Satu - Duabelas
+      // ======================================================
 
       const values = {
 
-        Satu: body.Satu ?? "",
-        Dua: body.Dua ?? "",
-        Tiga: body.Tiga ?? "",
-        Empat: body.Empat ?? "",
-        Lima: body.Lima ?? "",
-        Enam: body.Enam ?? "",
-        Tujuh: body.Tujuh ?? "",
-        Delapan: body.Delapan ?? "",
-        Sembilan: body.Sembilan ?? "",
-        Sepuluh: body.Sepuluh ?? "",
-        Sebelas: body.Sebelas ?? "",
-        Duabelas: body.Duabelas ?? ""
+        Satu: safeString(body.Satu),
+
+        Dua: safeString(body.Dua),
+
+        Tiga: safeString(body.Tiga),
+
+        Empat: safeString(body.Empat),
+
+        Lima: safeString(body.Lima),
+
+        Enam: safeString(body.Enam),
+
+        Tujuh: safeString(body.Tujuh),
+
+        Delapan: safeString(body.Delapan),
+
+        Sembilan: safeString(body.Sembilan),
+
+        Sepuluh: safeString(body.Sepuluh),
+
+        Sebelas: safeString(body.Sebelas),
+
+        Duabelas: safeString(body.Duabelas)
 
       };
 
 
-      // ===================================================
-      // LOAD HTML TEMPLATE
-      // ===================================================
+      // ======================================================
+      // DOWNLOAD HTML TEMPLATE
+      // ======================================================
 
       const templateResponse =
         await fetch(templateUrl);
@@ -113,7 +143,7 @@ export default {
         throw new Error(
           "Template " +
           templateName +
-          ".html tidak ditemukan di GitHub. HTTP " +
+          ".html tidak dapat diambil dari GitHub. HTTP " +
           templateResponse.status
         );
 
@@ -124,99 +154,95 @@ export default {
         await templateResponse.text();
 
 
-      // ===================================================
-      // REPLACE Satu - Duabelas
-      // ===================================================
+      if (!html || html.trim() === "") {
+
+        throw new Error(
+          "Template " +
+          templateName +
+          ".html kosong."
+        );
+
+      }
+
+
+      // ======================================================
+      // PREKURSOR MASTER
+      // ======================================================
+
+      let prekursorRows = [];
+
+
+      if (templateName === "Prekursor") {
+
+        prekursorRows =
+          await loadPrekursorMaster();
+
+      }
+
+
+      // ======================================================
+      // REPLACE DATA
+      // ======================================================
 
       html =
-        replaceTemplateValues(
+        replaceAllPlaceholders(
           html,
           values
         );
 
 
-      // ===================================================
-      // TTD
-      // ===================================================
-
-      if (body.ttdBase64) {
-
-        html =
-          injectImage(
-            html,
-            "TTD",
-            body.ttdBase64
-          );
-
-      }
-
-
-      // ===================================================
-      // STEMPEL
-      // ===================================================
-
-      if (body.stempelBase64) {
-
-        html =
-          injectImage(
-            html,
-            "STEMPEL",
-            body.stempelBase64
-          );
-
-      }
-
-
-      // ===================================================
-      // PREKURSOR
-      // =====================================================
-
-      let prekursorCount = 0;
-
+      // ======================================================
+      // PREKURSOR DATA
+      // ======================================================
 
       if (templateName === "Prekursor") {
 
-        const rows =
-          await loadPrekursorMaster();
-
-
-        prekursorCount =
-          rows.length;
-
-
         html =
-          injectPrekursorData(
+          applyPrekursorLookup(
             html,
-            rows
+            prekursorRows,
+            body
           );
 
       }
 
 
-      // ===================================================
-      // A4 PRINT CSS
-      // ===================================================
+      // ======================================================
+      // TTD + STEMPEL
+      // ======================================================
 
       html =
-        addA4PrintCSS(html);
+        applySignatureAndStamp(
+          html,
+          body.ttdBase64,
+          body.stempelBase64
+        );
 
 
-      // ===================================================
-      // BROWSER CHECK
-      // ===================================================
+      // ======================================================
+      // A4 CSS
+      // ======================================================
+
+      html =
+        injectA4CSS(html);
+
+
+      // ======================================================
+      // BROWSER BINDING
+      // ======================================================
 
       if (!env.BROWSER) {
 
         throw new Error(
-          "BROWSER binding tidak tersedia di Cloudflare."
+          "Cloudflare Browser binding BROWSER tidak tersedia."
         );
 
       }
 
 
-      // ===================================================
+      // ======================================================
       // LAUNCH BROWSER
-      // ===================================================
+      // ======================================================
 
       const browser =
         await puppeteer.launch(
@@ -226,22 +252,32 @@ export default {
 
       try {
 
+        // ====================================================
+        // NEW PAGE
+        // ====================================================
+
         const page =
           await browser.newPage();
 
 
-        // A4 viewport
+        // ====================================================
+        // VIEWPORT A4
+        // ====================================================
 
         await page.setViewport({
+
           width: 794,
+
           height: 1123,
+
           deviceScaleFactor: 1
+
         });
 
 
-        // =================================================
+        // ====================================================
         // LOAD HTML
-        // =================================================
+        // ====================================================
 
         await page.setContent(
           html,
@@ -251,9 +287,45 @@ export default {
         );
 
 
-        // =================================================
-        // GENERATE PDF A4
-        // =================================================
+        // ====================================================
+        // WAIT IMAGE
+        // ====================================================
+
+        await page.evaluate(async function () {
+
+          const images =
+            Array.from(
+              document.images
+            );
+
+          await Promise.all(
+            images.map(
+              function (img) {
+
+                if (img.complete) {
+                  return Promise.resolve();
+                }
+
+                return new Promise(
+                  function (resolve) {
+
+                    img.onload = resolve;
+
+                    img.onerror = resolve;
+
+                  }
+                );
+
+              }
+            )
+          );
+
+        });
+
+
+        // ====================================================
+        // PDF A4
+        // ====================================================
 
         const pdfBytes =
           await page.pdf({
@@ -265,18 +337,23 @@ export default {
             preferCSSPageSize: true,
 
             margin: {
+
               top: "0mm",
+
               right: "0mm",
+
               bottom: "0mm",
+
               left: "0mm"
+
             }
 
           });
 
 
-        // =================================================
-        // RESPONSE
-        // =================================================
+        // ====================================================
+        // RETURN
+        // ====================================================
 
         return jsonResponse({
 
@@ -284,8 +361,20 @@ export default {
 
           template: templateName,
 
+          pageCount:
+            await page.evaluate(
+              function () {
+
+                return Math.ceil(
+                  document.body.scrollHeight /
+                  document.documentElement.clientHeight
+                );
+
+              }
+            ),
+
           prekursorLookup:
-            prekursorCount,
+            prekursorRows.length,
 
           pdfBase64:
             uint8ArrayToBase64(
@@ -309,22 +398,25 @@ export default {
         success: false,
 
         error:
-          error?.message ||
-          String(error)
+          error &&
+          error.message
+            ? error.message
+            : String(error)
 
       }, 500);
 
     }
 
   }
+
 };
 
 
-// =========================================================
-// REPLACE TEMPLATE VALUES
-// =========================================================
+// ============================================================
+// REPLACE ALL PLACEHOLDERS
+// ============================================================
 
-function replaceTemplateValues(
+function replaceAllPlaceholders(
   html,
   values
 ) {
@@ -333,13 +425,12 @@ function replaceTemplateValues(
 
 
   for (
-    const [key, value]
-    of Object.entries(values)
+    const key of Object.keys(values)
   ) {
 
-    const safeValue =
+    const value =
       escapeHtml(
-        String(value ?? "")
+        values[key]
       );
 
 
@@ -353,7 +444,7 @@ function replaceTemplateValues(
           "\\s*\\}\\}",
           "gi"
         ),
-        safeValue
+        value
       );
 
 
@@ -367,7 +458,21 @@ function replaceTemplateValues(
           "\\s*\\]\\]",
           "gi"
         ),
-        safeValue
+        value
+      );
+
+
+    // <<Satu>>
+
+    result =
+      result.replace(
+        new RegExp(
+          "<<\\s*" +
+          escapeRegExp(key) +
+          "\\s*>>",
+          "gi"
+        ),
+        value
       );
 
 
@@ -381,108 +486,318 @@ function replaceTemplateValues(
           "\\s*\\}\\}",
           "gi"
         ),
-        safeValue
+        value
       );
 
   }
 
 
   return result;
+
 }
 
 
-// =========================================================
-// IMAGE INJECTION
-// =========================================================
+// ============================================================
+// PREKURSOR LOOKUP
+// ============================================================
 
-function injectImage(
+function applyPrekursorLookup(
   html,
-  placeholder,
-  base64
+  rows,
+  body
 ) {
 
-  if (!base64) {
+  // ----------------------------------------------------------
+  // Jumlah master
+  // ----------------------------------------------------------
+
+  html =
+    replacePlaceholder(
+      html,
+      "PREKURSOR_COUNT",
+      String(rows.length)
+    );
+
+
+  // ----------------------------------------------------------
+  // Jika Power Automate mengirim SKU
+  // ----------------------------------------------------------
+
+  const sku =
+    safeString(
+      body.productSKU ||
+      body.SKU ||
+      body.sku
+    );
+
+
+  if (!sku) {
+
     return html;
+
   }
 
 
-  const imageSrc =
-    normalizeImageBase64(base64);
+  // ----------------------------------------------------------
+  // Cari SKU
+  // ----------------------------------------------------------
+
+  const found =
+    rows.find(
+      function (row) {
+
+        const rowSku =
+          safeString(
+            row["Product SKU"] ||
+            row["SKU"] ||
+            row["sku"]
+          );
+
+        return (
+          rowSku.toLowerCase() ===
+          sku.toLowerCase()
+        );
+
+      }
+    );
 
 
-  const imageHtml =
-    '<img src="' +
-    imageSrc +
-    '" class="sp-' +
-    placeholder.toLowerCase() +
-    '" />';
+  if (!found) {
+
+    return html;
+
+  }
 
 
-  return html
+  // ----------------------------------------------------------
+  // Zat Aktif
+  // ----------------------------------------------------------
 
-    .replace(
+  const zatAktif =
+    safeString(
+      found["Zat Aktif"] ||
+      found["ZatAktif"] ||
+      found["ZAT AKTIF"]
+    );
+
+
+  // ----------------------------------------------------------
+  // Bentuk
+  // ----------------------------------------------------------
+
+  const bentuk =
+    safeString(
+      found["Bentuk"] ||
+      found["BENTUK"]
+    );
+
+
+  html =
+    replacePlaceholder(
+      html,
+      "ZAT_AKTIF",
+      zatAktif
+    );
+
+
+  html =
+    replacePlaceholder(
+      html,
+      "ZatAktif",
+      zatAktif
+    );
+
+
+  html =
+    replacePlaceholder(
+      html,
+      "BENTUK",
+      bentuk
+    );
+
+
+  html =
+    replacePlaceholder(
+      html,
+      "Bentuk",
+      bentuk
+    );
+
+
+  return html;
+
+}
+
+
+// ============================================================
+// SIGNATURE + STAMP
+// ============================================================
+
+function applySignatureAndStamp(
+  html,
+  ttdBase64,
+  stempelBase64
+) {
+
+  let result = html;
+
+
+  // ==========================================================
+  // TTD
+  // ==========================================================
+
+  if (ttdBase64) {
+
+    const ttd =
+      normalizeImageBase64(
+        ttdBase64
+      );
+
+
+    const ttdHtml =
+      '<img class="sp-ttd" src="' +
+      ttd +
+      '" />';
+
+
+    result =
+      replacePlaceholder(
+        result,
+        "TTD",
+        ttdHtml
+      );
+
+  }
+
+
+  // ==========================================================
+  // STEMPEL
+  // ==========================================================
+
+  if (stempelBase64) {
+
+    const stempel =
+      normalizeImageBase64(
+        stempelBase64
+      );
+
+
+    const stempelHtml =
+      '<img class="sp-stempel" src="' +
+      stempel +
+      '" />';
+
+
+    result =
+      replacePlaceholder(
+        result,
+        "STEMPEL",
+        stempelHtml
+      );
+
+  }
+
+
+  return result;
+
+}
+
+
+// ============================================================
+// REPLACE SINGLE PLACEHOLDER
+// ============================================================
+
+function replacePlaceholder(
+  html,
+  name,
+  value
+) {
+
+  let result = html;
+
+
+  result =
+    result.replace(
       new RegExp(
         "\\{\\{\\s*" +
-        placeholder +
+        escapeRegExp(name) +
         "\\s*\\}\\}",
         "gi"
       ),
-      imageHtml
-    )
+      value
+    );
 
-    .replace(
+
+  result =
+    result.replace(
       new RegExp(
         "\\[\\[\\s*" +
-        placeholder +
+        escapeRegExp(name) +
         "\\s*\\]\\]",
         "gi"
       ),
-      imageHtml
+      value
     );
+
+
+  result =
+    result.replace(
+      new RegExp(
+        "<<\\s*" +
+        escapeRegExp(name) +
+        "\\s*>>",
+        "gi"
+      ),
+      value
+    );
+
+
+  return result;
 
 }
 
 
-// =========================================================
-// NORMALIZE IMAGE
-// =========================================================
+// ============================================================
+// IMAGE NORMALIZER
+// ============================================================
 
 function normalizeImageBase64(
-  base64
+  value
 ) {
 
-  const value =
-    String(base64).trim();
+  const clean =
+    String(value)
+      .trim();
 
 
   if (
-    /^data:image\//i.test(value)
+    /^data:image\//i.test(clean)
   ) {
 
-    return value;
+    return clean;
 
   }
 
 
   if (
-    value.startsWith("iVBOR")
+    clean.indexOf("iVBOR") === 0
   ) {
 
     return (
       "data:image/png;base64," +
-      value
+      clean
     );
 
   }
 
 
   if (
-    value.startsWith("/9j/")
+    clean.indexOf("/9j/") === 0
   ) {
 
     return (
       "data:image/jpeg;base64," +
-      value
+      clean
     );
 
   }
@@ -490,15 +805,15 @@ function normalizeImageBase64(
 
   return (
     "data:image/png;base64," +
-    value
+    clean
   );
 
 }
 
 
-// =========================================================
-// PREKURSOR MASTER
-// =========================================================
+// ============================================================
+// LOAD MASTER PREKURSOR
+// ============================================================
 
 async function loadPrekursorMaster() {
 
@@ -511,7 +826,7 @@ async function loadPrekursorMaster() {
   if (!response.ok) {
 
     throw new Error(
-      "Gagal mengambil master_prekursor.csv. HTTP " +
+      "Gagal membaca master_prekursor.csv. HTTP " +
       response.status
     );
 
@@ -527,31 +842,40 @@ async function loadPrekursorMaster() {
 }
 
 
-// =========================================================
+// ============================================================
 // CSV PARSER
-// =========================================================
+// ============================================================
 
-function parseCSV(csv) {
+function parseCSV(
+  csv
+) {
 
   const lines =
     csv
       .split(/\r?\n/)
       .filter(
-        line =>
-          line.trim() !== ""
+        function (line) {
+
+          return line.trim() !== "";
+
+        }
       );
 
 
   if (lines.length < 2) {
+
     return [];
+
   }
 
 
   const headers =
-    parseCSVLine(lines[0]);
+    parseCSVLine(
+      lines[0]
+    );
 
 
-  const result = [];
+  const rows = [];
 
 
   for (
@@ -561,45 +885,49 @@ function parseCSV(csv) {
   ) {
 
     const columns =
-      parseCSVLine(lines[i]);
+      parseCSVLine(
+        lines[i]
+      );
 
 
     const row = {};
 
 
     headers.forEach(
-      (header, index) => {
+      function (header, index) {
 
         row[
           header.trim()
         ] =
-          columns[index] ?? "";
+          columns[index] || "";
 
       }
     );
 
 
-    result.push(row);
+    rows.push(row);
 
   }
 
 
-  return result;
+  return rows;
 
 }
 
 
-// =========================================================
-// CSV LINE
-// =========================================================
+// ============================================================
+// CSV LINE PARSER
+// ============================================================
 
-function parseCSVLine(line) {
+function parseCSVLine(
+  line
+) {
 
   const result = [];
 
   let current = "";
 
-  let insideQuotes = false;
+  let quoted = false;
 
 
   for (
@@ -615,7 +943,7 @@ function parseCSVLine(line) {
     if (char === '"') {
 
       if (
-        insideQuotes &&
+        quoted &&
         line[i + 1] === '"'
       ) {
 
@@ -625,15 +953,14 @@ function parseCSVLine(line) {
 
       } else {
 
-        insideQuotes =
-          !insideQuotes;
+        quoted = !quoted;
 
       }
 
 
     } else if (
       char === "," &&
-      !insideQuotes
+      !quoted
     ) {
 
       result.push(
@@ -662,81 +989,57 @@ function parseCSVLine(line) {
 }
 
 
-// =========================================================
-// PREKURSOR HTML
-// =========================================================
-
-function injectPrekursorData(
-  html,
-  rows
-) {
-
-  html =
-    html.replace(
-      /\{\{\s*PREKURSOR_COUNT\s*\}\}/gi,
-      String(rows.length)
-    );
-
-
-  return html;
-
-}
-
-
-// =========================================================
+// ============================================================
 // A4 CSS
-// =========================================================
+// ============================================================
 
-function addA4PrintCSS(
+function injectA4CSS(
   html
 ) {
 
   const css =
     "<style>" +
 
-    "@page {" +
-    "size: A4;" +
-    "margin: 0;" +
+    "@page{" +
+    "size:A4;" +
+    "margin:0;" +
     "}" +
 
-    "html, body {" +
-    "margin: 0;" +
-    "padding: 0;" +
-    "width: 210mm;" +
-    "min-height: 297mm;" +
+    "html,body{" +
+    "width:210mm;" +
+    "min-height:297mm;" +
+    "margin:0;" +
+    "padding:0;" +
     "}" +
 
-    "* {" +
-    "box-sizing: border-box;" +
+    "body{" +
+    "-webkit-print-color-adjust:exact;" +
+    "print-color-adjust:exact;" +
     "}" +
 
-    ".sp-ttd {" +
-    "max-width: 170px;" +
-    "max-height: 90px;" +
-    "object-fit: contain;" +
+    "*{" +
+    "box-sizing:border-box;" +
     "}" +
 
-    ".sp-stempel {" +
-    "max-width: 120px;" +
-    "max-height: 120px;" +
-    "object-fit: contain;" +
+    ".sp-ttd{" +
+    "max-width:170px;" +
+    "max-height:90px;" +
+    "object-fit:contain;" +
+    "display:inline-block;" +
     "}" +
 
-    "@media print {" +
-
-    "html, body {" +
-    "width: 210mm;" +
-    "margin: 0;" +
-    "padding: 0;" +
-    "}" +
-
+    ".sp-stempel{" +
+    "max-width:120px;" +
+    "max-height:120px;" +
+    "object-fit:contain;" +
+    "display:inline-block;" +
     "}" +
 
     "</style>";
 
 
   if (
-    html.includes("</head>")
+    html.indexOf("</head>") !== -1
   ) {
 
     return html.replace(
@@ -752,9 +1055,32 @@ function addA4PrintCSS(
 }
 
 
-// =========================================================
-// ESCAPE HTML
-// =========================================================
+// ============================================================
+// SAFE STRING
+// ============================================================
+
+function safeString(
+  value
+) {
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+
+    return "";
+
+  }
+
+
+  return String(value);
+
+}
+
+
+// ============================================================
+// HTML ESCAPE
+// ============================================================
 
 function escapeHtml(
   value
@@ -790,9 +1116,9 @@ function escapeHtml(
 }
 
 
-// =========================================================
-// ESCAPE REGEX
-// =========================================================
+// ============================================================
+// REGEX ESCAPE
+// ============================================================
 
 function escapeRegExp(
   value
@@ -807,9 +1133,9 @@ function escapeRegExp(
 }
 
 
-// =========================================================
-// UINT8ARRAY -> BASE64
-// =========================================================
+// ============================================================
+// UINT8 ARRAY -> BASE64
+// ============================================================
 
 function uint8ArrayToBase64(
   bytes
@@ -827,15 +1153,19 @@ function uint8ArrayToBase64(
     i += chunkSize
   ) {
 
+    const chunk =
+      bytes.subarray(
+        i,
+        Math.min(
+          i + chunkSize,
+          bytes.length
+        )
+      );
+
+
     binary +=
       String.fromCharCode(
-        ...bytes.subarray(
-          i,
-          Math.min(
-            i + chunkSize,
-            bytes.length
-          )
-        )
+        ...chunk
       );
 
   }
@@ -846,19 +1176,20 @@ function uint8ArrayToBase64(
 }
 
 
-// =========================================================
+// ============================================================
 // JSON RESPONSE
-// =========================================================
+// ============================================================
 
 function jsonResponse(
   data,
-  status = 200
+  status
 ) {
 
   return new Response(
     JSON.stringify(data),
     {
-      status: status,
+      status:
+        status || 200,
 
       headers: {
         "content-type":
@@ -868,3 +1199,4 @@ function jsonResponse(
   );
 
 }
+```
