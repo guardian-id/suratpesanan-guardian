@@ -1,6 +1,9 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "suratpesanan-guardian",
   "main": "index.js",
-  "compatibility_date": "2026-08-22"
+  "compatibility_date": "2026-08-22",
+  "browser": {
+    "binding": "BROWSER"
+  }
 }
