@@ -1,5 +1,10 @@
 export default {
-  async fetch(request, env) {
-    return new Response("SP GUARDIAN WORKER OK");
+  fetch(request, env, ctx) {
+    return new Response("SP GUARDIAN WORKER OK", {
+      status: 200,
+      headers: {
+        "content-type": "text/plain; charset=UTF-8"
+      }
+    });
   }
 };
