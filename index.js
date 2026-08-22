@@ -38,10 +38,6 @@ export default {
 
       const body = await request.json();
 
-      if (!body || typeof body !== "object") {
-        throw new Error("Body JSON tidak valid.");
-      }
-
       const template = String(body.template || "")
         .trim()
         .toLowerCase();
@@ -58,7 +54,7 @@ export default {
 
       /*
        * =====================================================
-       * AMBIL TEMPLATE DARI GITHUB
+       * 1. AMBIL TEMPLATE DARI GITHUB
        * =====================================================
        */
 
@@ -75,12 +71,6 @@ export default {
         "Template PDF"
       );
 
-      /*
-       * =====================================================
-       * LOAD PDF TEMPLATE
-       * =====================================================
-       */
-
       const pdf =
         await PDFDocument.load(
           templateBytes
@@ -88,36 +78,23 @@ export default {
 
       /*
        * =====================================================
-       * DATA SATU - DUABELAS
+       * 2. DATA SATU - DUABELAS
        * =====================================================
        */
 
       const data = {};
 
       for (const key of PLACEHOLDERS) {
-        if (
+        data[key] =
           body[key] === undefined ||
           body[key] === null
-        ) {
-          data[key] = "";
-        } else {
-          data[key] = String(body[key]);
-        }
+            ? ""
+            : String(body[key]);
       }
 
       /*
        * =====================================================
-       * PREKURSOR LOOKUP
-       *
-       * PDF UPLOAD
-       *      ↓
-       * EXTRACT TEXT
-       *      ↓
-       * PRODUCT SKU
-       *      ↓
-       * master_prekursor.csv
-       *      ↓
-       * Zat Aktif + Bentuk
+       * 3. PREKURSOR
        * =====================================================
        */
 
@@ -151,7 +128,7 @@ export default {
             uploadedText
           );
 
-        if (skuList.length === 0) {
+        if (!skuList.length) {
           throw new Error(
             "Product SKU tidak ditemukan pada PDF upload."
           );
@@ -170,10 +147,7 @@ export default {
 
         for (const sku of skuList) {
           const row =
-            findSKU(
-              master,
-              sku
-            );
+            findSKU(master, sku);
 
           if (row) {
             found = row;
@@ -184,30 +158,25 @@ export default {
 
         if (!found) {
           throw new Error(
-            `SKU tidak ditemukan di master_prekursor.csv. SKU yang terbaca: ${skuList.join(", ")}`
+            "SKU tidak ditemukan di master_prekursor.csv. " +
+            `SKU terbaca: ${skuList.join(", ")}`
           );
         }
 
         const zatAktif =
-          firstValue(
-            found,
-            [
-              "Zat Aktif",
-              "ZatAktif",
-              "ZAT AKTIF",
-              "zat aktif"
-            ]
-          );
+          firstValue(found, [
+            "Zat Aktif",
+            "ZatAktif",
+            "ZAT AKTIF",
+            "zat aktif"
+          ]);
 
         const bentuk =
-          firstValue(
-            found,
-            [
-              "Bentuk",
-              "BENTUK",
-              "bentuk"
-            ]
-          );
+          firstValue(found, [
+            "Bentuk",
+            "BENTUK",
+            "bentuk"
+          ]);
 
         lookupInfo = {
           productSKU: foundSKU,
@@ -221,7 +190,7 @@ export default {
 
       /*
        * =====================================================
-       * REPLACE TEXT
+       * 4. REPLACE SATU-DUABELAS
        * =====================================================
        */
 
@@ -233,7 +202,7 @@ export default {
 
       /*
        * =====================================================
-       * TTD + STEMPEL
+       * 5. TTD + STEMPEL
        * =====================================================
        */
 
@@ -246,17 +215,17 @@ export default {
 
       /*
        * =====================================================
-       * SAVE
+       * 6. OUTPUT
        * =====================================================
        */
 
       const outputBytes =
-        await pdf.save();
+        await pdf.save({
+          useObjectStreams: false
+        });
 
       const outputBase64 =
-        bytesToBase64(
-          outputBytes
-        );
+        bytesToBase64(outputBytes);
 
       const result = {
         success: true,
@@ -265,10 +234,8 @@ export default {
           template === "prekursor"
             ? "Prekursor"
             : "Reguler",
-        pages:
-          pdf.getPageCount(),
-        spBase64:
-          outputBase64
+        pages: pdf.getPageCount(),
+        spBase64: outputBase64
       };
 
       if (lookupInfo) {
@@ -302,6 +269,10 @@ export default {
 /*
  * ==========================================================
  * REPLACE PLACEHOLDERS
+ *
+ * PENTING:
+ * Setiap placeholder hanya diproses SATU KALI.
+ * Tidak ada lagi kombinasi text item seperti versi lama.
  * ==========================================================
  */
 
@@ -315,10 +286,7 @@ async function replacePlaceholders(
 
   const source =
     await pdfjs.getDocument({
-      data:
-        new Uint8Array(
-          templateBytes
-        ),
+      data: new Uint8Array(templateBytes),
       useSystemFonts: true
     }).promise;
 
@@ -331,115 +299,129 @@ async function replacePlaceholders(
     pdf.getPages();
 
   for (
-    let pageNumber = 1;
-    pageNumber <= source.numPages;
-    pageNumber++
+    let pageIndex = 0;
+    pageIndex < source.numPages;
+    pageIndex++
   ) {
     const sourcePage =
       await source.getPage(
-        pageNumber
+        pageIndex + 1
       );
 
     const textContent =
       await sourcePage.getTextContent();
 
     const items =
-      textContent.items || [];
+      (textContent.items || [])
+        .filter(
+          item =>
+            typeof item.str === "string" &&
+            item.str.trim() !== ""
+        );
 
     const targetPage =
-      pages[pageNumber - 1];
+      pages[pageIndex];
 
     if (!targetPage) {
       continue;
     }
 
-    for (const key of Object.keys(data)) {
+    /*
+     * Set lokasi yang sudah diproses.
+     * Ini mencegah TEST SATU berulang.
+     */
+    const processed = new Set();
+
+    for (const key of PLACEHOLDERS) {
       const value =
-        String(
-          data[key] ?? ""
+        String(data[key] ?? "");
+
+      /*
+       * HANYA exact item.
+       */
+      const item =
+        items.find(
+          x =>
+            String(x.str).trim() === key
         );
 
-      const matches =
-        findText(
-          items,
-          key
-        );
-
-      for (const match of matches) {
-        const transform =
-          match.transform;
-
-        if (!transform) {
-          continue;
-        }
-
-        const x =
-          Number(transform[4] || 0);
-
-        const y =
-          Number(transform[5] || 0);
-
-        const fontSize =
-          Math.max(
-            6,
-            Math.abs(
-              Number(transform[3] || 10)
-            )
-          );
-
-        const width =
-          Math.max(
-            Number(match.width || 0),
-            key.length *
-              fontSize *
-              0.5
-          );
-
-        /*
-         * Hapus placeholder lama
-         */
-
-        targetPage.drawRectangle({
-          x: x - 1,
-          y: y - fontSize - 2,
-          width: width + 6,
-          height: fontSize + 6,
-          color: rgb(1, 1, 1)
-        });
-
-        /*
-         * Kalau kosong:
-         * placeholder tetap dihapus.
-         */
-
-        if (
-          value.trim() === ""
-        ) {
-          continue;
-        }
-
-        /*
-         * Tulis nilai baru.
-         */
-
-        targetPage.drawText(
-          value,
-          {
-            x: x,
-            y: y - fontSize,
-            size: fontSize,
-            font: font,
-            color: rgb(0, 0, 0),
-            maxWidth:
-              Math.max(
-                width + 150,
-                150
-              ),
-            lineHeight:
-              fontSize * 1.2
-          }
-        );
+      if (!item) {
+        continue;
       }
+
+      const transform =
+        item.transform;
+
+      if (!transform) {
+        continue;
+      }
+
+      const x =
+        Number(transform[4] || 0);
+
+      const y =
+        Number(transform[5] || 0);
+
+      const fontSize =
+        Math.max(
+          6,
+          Math.abs(
+            Number(transform[3] || 10)
+          )
+        );
+
+      const width =
+        Math.max(
+          Number(item.width || 0),
+          key.length * fontSize * 0.45
+        );
+
+      const locationKey =
+        [
+          Math.round(x * 100),
+          Math.round(y * 100),
+          key
+        ].join("|");
+
+      if (
+        processed.has(locationKey)
+      ) {
+        continue;
+      }
+
+      processed.add(locationKey);
+
+      /*
+       * Tutup placeholder saja.
+       */
+      targetPage.drawRectangle({
+        x: x - 1,
+        y: y - fontSize - 2,
+        width: width + 3,
+        height: fontSize + 5,
+        color: rgb(1, 1, 1)
+      });
+
+      /*
+       * Kalau kosong, cukup hapus placeholder.
+       */
+      if (!value.trim()) {
+        continue;
+      }
+
+      /*
+       * Tulis nilai baru SATU KALI.
+       */
+      targetPage.drawText(
+        value,
+        {
+          x: x,
+          y: y - fontSize + 1,
+          size: fontSize,
+          font: font,
+          color: rgb(0, 0, 0)
+        }
+      );
     }
   }
 
@@ -474,50 +456,40 @@ async function placeSignatureAndStamp(
   /*
    * TTD
    */
-
   if (ttdInput) {
-    const ttdBytes =
+    const bytes =
       base64ToBytes(
         extractImageBase64(
           ttdInput
         )
       );
 
-    if (isJpg(ttdBytes)) {
+    if (isJpg(bytes)) {
       ttdImage =
-        await pdf.embedJpg(
-          ttdBytes
-        );
+        await pdf.embedJpg(bytes);
     } else {
       ttdImage =
-        await pdf.embedPng(
-          ttdBytes
-        );
+        await pdf.embedPng(bytes);
     }
   }
 
   /*
    * STEMPEL
    */
-
   if (stampInput) {
-    const stampBytes =
+    const bytes =
       base64ToBytes(
         extractImageBase64(
           stampInput
         )
       );
 
-    if (isJpg(stampBytes)) {
+    if (isJpg(bytes)) {
       stampImage =
-        await pdf.embedJpg(
-          stampBytes
-        );
+        await pdf.embedJpg(bytes);
     } else {
       stampImage =
-        await pdf.embedPng(
-          stampBytes
-        );
+        await pdf.embedPng(bytes);
     }
   }
 
@@ -526,10 +498,7 @@ async function placeSignatureAndStamp(
 
   const source =
     await pdfjs.getDocument({
-      data:
-        new Uint8Array(
-          templateBytes
-        ),
+      data: new Uint8Array(templateBytes),
       useSystemFonts: true
     }).promise;
 
@@ -537,23 +506,27 @@ async function placeSignatureAndStamp(
     pdf.getPages();
 
   for (
-    let pageNumber = 1;
-    pageNumber <= source.numPages;
-    pageNumber++
+    let pageIndex = 0;
+    pageIndex < source.numPages;
+    pageIndex++
   ) {
     const sourcePage =
       await source.getPage(
-        pageNumber
+        pageIndex + 1
       );
 
     const textContent =
       await sourcePage.getTextContent();
 
     const items =
-      textContent.items || [];
+      (textContent.items || [])
+        .filter(
+          item =>
+            typeof item.str === "string"
+        );
 
     const targetPage =
-      pages[pageNumber - 1];
+      pages[pageIndex];
 
     if (!targetPage) {
       continue;
@@ -566,43 +539,46 @@ async function placeSignatureAndStamp(
      */
 
     if (ttdImage) {
-      const matches =
-        findText(
-          items,
-          "TTD"
+      const item =
+        items.find(
+          x =>
+            String(x.str)
+              .trim()
+              .toLowerCase() === "ttd"
         );
 
-      if (matches.length > 0) {
-        const match =
-          matches[0];
-
+      if (item && item.transform) {
         const x =
-          Number(
-            match.transform[4] || 0
-          );
+          Number(item.transform[4] || 0);
 
         const y =
-          Number(
-            match.transform[5] || 0
+          Number(item.transform[5] || 0);
+
+        const width =
+          Math.max(
+            Number(item.width || 0),
+            20
           );
 
+        /*
+         * Hapus keyword TTD.
+         */
         targetPage.drawRectangle({
-          x: x - 3,
-          y: y - 12,
-          width:
-            Math.max(
-              Number(match.width || 25),
-              25
-            ) + 6,
-          height: 20,
+          x: x - 2,
+          y: y - 14,
+          width: width + 4,
+          height: 18,
           color: rgb(1, 1, 1)
         });
 
+        /*
+         * TTD.
+         */
         targetPage.drawImage(
           ttdImage,
           {
-            x: x - 15,
-            y: y + 5,
+            x: x - 10,
+            y: y + 2,
             width: 105,
             height: 55
           }
@@ -617,43 +593,46 @@ async function placeSignatureAndStamp(
      */
 
     if (stampImage) {
-      const matches =
-        findText(
-          items,
-          "Stempel"
+      const item =
+        items.find(
+          x =>
+            String(x.str)
+              .trim()
+              .toLowerCase() === "stempel"
         );
 
-      if (matches.length > 0) {
-        const match =
-          matches[0];
-
+      if (item && item.transform) {
         const x =
-          Number(
-            match.transform[4] || 0
-          );
+          Number(item.transform[4] || 0);
 
         const y =
-          Number(
-            match.transform[5] || 0
+          Number(item.transform[5] || 0);
+
+        const width =
+          Math.max(
+            Number(item.width || 0),
+            30
           );
 
+        /*
+         * Hapus keyword Stempel.
+         */
         targetPage.drawRectangle({
-          x: x - 3,
-          y: y - 12,
-          width:
-            Math.max(
-              Number(match.width || 50),
-              50
-            ) + 6,
-          height: 20,
+          x: x - 2,
+          y: y - 14,
+          width: width + 4,
+          height: 18,
           color: rgb(1, 1, 1)
         });
 
+        /*
+         * Stempel.
+         */
         targetPage.drawImage(
           stampImage,
           {
             x: x - 5,
-            y: y - 50,
+            y: y - 45,
             width: 85,
             height: 85,
             opacity: 0.85
@@ -671,164 +650,19 @@ async function placeSignatureAndStamp(
 
 /*
  * ==========================================================
- * FIND TEXT
+ * PDF.JS
  * ==========================================================
  */
 
-function findText(
-  items,
-  target
-) {
-  const results = [];
+let pdfJsPromise = null;
 
-  /*
-   * Text dalam satu item
-   */
-
-  for (const item of items) {
-    if (
-      typeof item.str !== "string"
-    ) {
-      continue;
-    }
-
-    if (
-      item.str.includes(target)
-    ) {
-      results.push({
-        transform:
-          item.transform,
-        width:
-          item.width || 0,
-        text:
-          item.str
-      });
-    }
+async function getPdfJs() {
+  if (!pdfJsPromise) {
+    pdfJsPromise =
+      import("pdfjs-serverless");
   }
 
-  /*
-   * Text terpecah.
-   *
-   * Contoh:
-   * Sa + tu
-   * Dua + belas
-   */
-
-  for (
-    let i = 0;
-    i < items.length;
-    i++
-  ) {
-    let combined = "";
-    let first = null;
-    let last = null;
-
-    for (
-      let j = i;
-      j < Math.min(
-        i + 12,
-        items.length
-      );
-      j++
-    ) {
-      const item =
-        items[j];
-
-      if (
-        typeof item.str !== "string"
-      ) {
-        continue;
-      }
-
-      if (!first) {
-        first = item;
-      }
-
-      combined += item.str;
-      last = item;
-
-      if (
-        combined.includes(target)
-      ) {
-        results.push({
-          transform:
-            first.transform,
-          width:
-            combinedWidth(
-              first,
-              last
-            ),
-          text:
-            combined
-        });
-
-        break;
-      }
-    }
-  }
-
-  return removeDuplicates(
-    results
-  );
-}
-
-
-function combinedWidth(
-  first,
-  last
-) {
-  if (
-    !first ||
-    !last
-  ) {
-    return 0;
-  }
-
-  const x1 =
-    Number(
-      first.transform?.[4] || 0
-    );
-
-  const x2 =
-    Number(
-      last.transform?.[4] || 0
-    );
-
-  return (
-    Math.abs(x2 - x1) +
-    Number(last.width || 0)
-  );
-}
-
-
-function removeDuplicates(
-  items
-) {
-  const result = [];
-  const seen = new Set();
-
-  for (const item of items) {
-    const t =
-      item.transform || [];
-
-    const key =
-      [
-        t[4],
-        t[5],
-        item.text
-      ].join("|");
-
-    if (
-      seen.has(key)
-    ) {
-      continue;
-    }
-
-    seen.add(key);
-    result.push(item);
-  }
-
-  return result;
+  return pdfJsPromise;
 }
 
 
@@ -846,10 +680,7 @@ async function extractPdfText(
 
   const document =
     await pdfjs.getDocument({
-      data:
-        new Uint8Array(
-          pdfBytes
-        ),
+      data: new Uint8Array(pdfBytes),
       useSystemFonts: true
     }).promise;
 
@@ -889,42 +720,17 @@ async function extractPdfText(
 
 /*
  * ==========================================================
- * PDF.JS
+ * SKU
  * ==========================================================
  */
 
-let pdfJsPromise = null;
-
-async function getPdfJs() {
-  if (!pdfJsPromise) {
-    pdfJsPromise =
-      import(
-        "pdfjs-serverless"
-      );
-  }
-
-  return pdfJsPromise;
-}
-
-
-/*
- * ==========================================================
- * EXTRACT PRODUCT SKU
- * ==========================================================
- */
-
-function extractProductSKUs(
-  text
-) {
-  const result = [];
-
+function extractProductSKUs(text) {
   const normalized =
     String(text || "")
-      .replace(
-        /\s+/g,
-        " "
-      )
+      .replace(/\s+/g, " ")
       .trim();
+
+  const result = [];
 
   const patterns = [
     /Product\s*SKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i,
@@ -932,47 +738,28 @@ function extractProductSKUs(
     /SKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i
   ];
 
-  for (
-    const pattern of patterns
-  ) {
+  for (const pattern of patterns) {
     const match =
-      normalized.match(
-        pattern
-      );
+      normalized.match(pattern);
 
-    if (
-      match &&
-      match[1]
-    ) {
-      result.push(
-        match[1]
-      );
+    if (match?.[1]) {
+      result.push(match[1]);
     }
   }
 
-  /*
-   * Fallback angka SKU
-   */
-
-  if (
-    result.length === 0
-  ) {
+  if (!result.length) {
     const fallback =
       normalized.match(
         /\b\d{5,12}\b/g
       ) || [];
 
-    result.push(
-      ...fallback
-    );
+    result.push(...fallback);
   }
 
   return [
     ...new Set(
       result.map(
-        value =>
-          String(value)
-            .trim()
+        x => String(x).trim()
       )
     )
   ];
@@ -985,34 +772,24 @@ function extractProductSKUs(
  * ==========================================================
  */
 
-function parseCSV(
-  text
-) {
-  const cleanText =
+function parseCSV(text) {
+  const clean =
     String(text || "")
-      .replace(
-        /^\uFEFF/,
-        ""
-      );
+      .replace(/^\uFEFF/, "");
 
   const lines =
-    cleanText
+    clean
       .split(/\r?\n/)
       .filter(
-        line =>
-          line.trim() !== ""
+        line => line.trim() !== ""
       );
 
-  if (
-    lines.length === 0
-  ) {
+  if (!lines.length) {
     return [];
   }
 
   const headers =
-    parseCSVLine(
-      lines[0]
-    );
+    parseCSVLine(lines[0]);
 
   const rows = [];
 
@@ -1022,9 +799,7 @@ function parseCSV(
     i++
   ) {
     const values =
-      parseCSVLine(
-        lines[i]
-      );
+      parseCSVLine(lines[i]);
 
     const row = {};
 
@@ -1033,9 +808,7 @@ function parseCSV(
       j < headers.length;
       j++
     ) {
-      row[
-        headers[j]
-      ] =
+      row[headers[j]] =
         values[j] ?? "";
     }
 
@@ -1046,9 +819,7 @@ function parseCSV(
 }
 
 
-function parseCSVLine(
-  line
-) {
+function parseCSVLine(line) {
   const result = [];
 
   let current = "";
@@ -1059,12 +830,9 @@ function parseCSVLine(
     i < line.length;
     i++
   ) {
-    const char =
-      line[i];
+    const char = line[i];
 
-    if (
-      char === '"'
-    ) {
+    if (char === '"') {
       if (
         quoted &&
         line[i + 1] === '"'
@@ -1072,66 +840,49 @@ function parseCSVLine(
         current += '"';
         i++;
       } else {
-        quoted =
-          !quoted;
+        quoted = !quoted;
       }
     } else if (
       char === "," &&
       !quoted
     ) {
-      result.push(
-        current.trim()
-      );
-
+      result.push(current.trim());
       current = "";
     } else {
       current += char;
     }
   }
 
-  result.push(
-    current.trim()
-  );
+  result.push(current.trim());
 
   return result;
 }
 
 
-function findSKU(
-  rows,
-  sku
-) {
+function findSKU(rows, sku) {
   const target =
-    normalizeSKU(
-      sku
-    );
+    normalizeSKU(sku);
 
   return (
-    rows.find(
-      row => {
-        const values = [
-          row["Product SKU"],
-          row["ProductSKU"],
-          row["SKU"],
-          row["Sku"],
-          row["sku"]
-        ];
+    rows.find(row => {
+      const values = [
+        row["Product SKU"],
+        row["ProductSKU"],
+        row["SKU"],
+        row["Sku"],
+        row["sku"]
+      ];
 
-        return values.some(
-          value =>
-            normalizeSKU(
-              value
-            ) === target
-        );
-      }
-    ) || null
+      return values.some(
+        value =>
+          normalizeSKU(value) === target
+      );
+    }) || null
   );
 }
 
 
-function normalizeSKU(
-  value
-) {
+function normalizeSKU(value) {
   if (
     value === undefined ||
     value === null
@@ -1141,21 +892,13 @@ function normalizeSKU(
 
   return String(value)
     .trim()
-    .replace(
-      /^0+/,
-      ""
-    )
+    .replace(/^0+/, "")
     .toUpperCase();
 }
 
 
-function firstValue(
-  object,
-  keys
-) {
-  for (
-    const key of keys
-  ) {
+function firstValue(object, keys) {
+  for (const key of keys) {
     if (
       object[key] !== undefined &&
       object[key] !== null
@@ -1172,27 +915,15 @@ function firstValue(
 
 /*
  * ==========================================================
- * DOWNLOAD GITHUB
+ * DOWNLOAD
  * ==========================================================
  */
 
-async function downloadBytes(
-  url
-) {
+async function downloadBytes(url) {
   const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "User-Agent":
-            "Guardian-PDF-Worker"
-        }
-      }
-    );
+    await fetch(url);
 
-  if (
-    !response.ok
-  ) {
+  if (!response.ok) {
     throw new Error(
       `Gagal mengambil file GitHub: HTTP ${response.status}`
     );
@@ -1204,23 +935,11 @@ async function downloadBytes(
 }
 
 
-async function downloadText(
-  url
-) {
+async function downloadText(url) {
   const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "User-Agent":
-            "Guardian-PDF-Worker"
-        }
-      }
-    );
+    await fetch(url);
 
-  if (
-    !response.ok
-  ) {
+  if (!response.ok) {
     throw new Error(
       `Gagal mengambil CSV: HTTP ${response.status}`
     );
@@ -1232,30 +951,36 @@ async function downloadText(
 
 /*
  * ==========================================================
- * BASE64 → BYTES
+ * BASE64
  * ==========================================================
  */
 
-function base64ToBytes(
-  input
-) {
+function base64ToBytes(input) {
   let value =
-    String(input || "")
-      .trim();
+    String(input || "").trim();
+
+  /*
+   * HTML IMG
+   */
+  const img =
+    value.match(
+      /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
+    );
+
+  if (img?.[1]) {
+    value = img[1];
+  }
 
   /*
    * Data URI
    */
-
   if (
     value.startsWith("data:")
   ) {
     const comma =
       value.indexOf(",");
 
-    if (
-      comma !== -1
-    ) {
+    if (comma >= 0) {
       value =
         value.substring(
           comma + 1
@@ -1263,28 +988,8 @@ function base64ToBytes(
     }
   }
 
-  /*
-   * HTML IMG
-   */
-
-  const imgMatch =
-    value.match(
-      /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
-    );
-
-  if (
-    imgMatch &&
-    imgMatch[1]
-  ) {
-    value =
-      imgMatch[1];
-  }
-
   value =
-    value.replace(
-      /\s/g,
-      ""
-    );
+    value.replace(/\s/g, "");
 
   if (!value) {
     throw new Error(
@@ -1295,8 +1000,7 @@ function base64ToBytes(
   let binary;
 
   try {
-    binary =
-      atob(value);
+    binary = atob(value);
   } catch (_) {
     throw new Error(
       "Base64 tidak valid."
@@ -1321,22 +1025,16 @@ function base64ToBytes(
 }
 
 
-function extractImageBase64(
-  input
-) {
+function extractImageBase64(input) {
   const value =
-    String(input || "")
-      .trim();
+    String(input || "").trim();
 
   const match =
     value.match(
       /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
     );
 
-  if (
-    match &&
-    match[1]
-  ) {
+  if (match?.[1]) {
     return match[1];
   }
 
@@ -1350,13 +1048,10 @@ function extractImageBase64(
  * ==========================================================
  */
 
-function bytesToBase64(
-  bytes
-) {
+function bytesToBase64(bytes) {
   let binary = "";
 
-  const chunkSize =
-    0x8000;
+  const chunkSize = 0x8000;
 
   for (
     let i = 0;
@@ -1375,9 +1070,7 @@ function bytesToBase64(
       );
   }
 
-  return btoa(
-    binary
-  );
+  return btoa(binary);
 }
 
 
@@ -1387,10 +1080,7 @@ function bytesToBase64(
  * ==========================================================
  */
 
-function validatePdf(
-  bytes,
-  name
-) {
+function validatePdf(bytes, name) {
   if (
     !bytes ||
     bytes.length < 5
@@ -1402,15 +1092,10 @@ function validatePdf(
 
   const header =
     new TextDecoder().decode(
-      bytes.slice(
-        0,
-        5
-      )
+      bytes.slice(0, 5)
     );
 
-  if (
-    header !== "%PDF-"
-  ) {
+  if (header !== "%PDF-") {
     throw new Error(
       `${name} bukan PDF valid.`
     );
@@ -1420,13 +1105,11 @@ function validatePdf(
 
 /*
  * ==========================================================
- * JPG CHECK
+ * JPG
  * ==========================================================
  */
 
-function isJpg(
-  bytes
-) {
+function isJpg(bytes) {
   return (
     bytes.length >= 3 &&
     bytes[0] === 0xff &&
@@ -1442,10 +1125,7 @@ function isJpg(
  * ==========================================================
  */
 
-function json(
-  data,
-  status = 200
-) {
+function json(data, status = 200) {
   return new Response(
     JSON.stringify(data),
     {
