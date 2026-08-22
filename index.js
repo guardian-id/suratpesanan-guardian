@@ -12,126 +12,121 @@ const PREKURSOR_TEMPLATE_URL =
 const MASTER_PREKURSOR_URL =
   GITHUB_RAW_BASE + "/master_prekursor.csv";
 
-export default {
-  async fetch(request, env) {
 
-    // =========================================================
+export default {
+  async fetch(request, env, ctx) {
+
+    // =====================================================
     // GET - HEALTH CHECK
-    // =========================================================
+    // =====================================================
 
     if (request.method === "GET") {
       return jsonResponse({
         success: true,
         message: "SP GUARDIAN WORKER OK",
         worker: "suratpesanan-guardian",
-        version: "HTML-TEMPLATE-FINAL"
+        version: "FINAL-HTML-1"
       });
     }
 
-    // =========================================================
+
+    // =====================================================
     // ONLY POST
-    // =========================================================
+    // =====================================================
 
     if (request.method !== "POST") {
-      return jsonResponse(
-        {
-          success: false,
-          error: "Method not allowed"
-        },
-        405
-      );
+      return jsonResponse({
+        success: false,
+        error: "Method not allowed"
+      }, 405);
     }
+
 
     try {
 
-      // =======================================================
+      // ===================================================
       // READ JSON
-      // =======================================================
+      // ===================================================
 
       const body = await request.json();
 
       if (!body || typeof body !== "object") {
-        return jsonResponse(
-          {
-            success: false,
-            error: "Invalid request body"
-          },
-          400
-        );
+        return jsonResponse({
+          success: false,
+          error: "Invalid request body"
+        }, 400);
       }
 
-      // =======================================================
-      // GET PARAMETERS
-      // =======================================================
+
+      // ===================================================
+      // TEMPLATE
+      // ===================================================
 
       const template =
-        body.template;
-
-      const ttdBase64 =
-        body.ttdBase64;
-
-      const stempelBase64 =
-        body.stempelBase64;
-
-      const values = {
-        Satu: safeValue(body.Satu),
-        Dua: safeValue(body.Dua),
-        Tiga: safeValue(body.Tiga),
-        Empat: safeValue(body.Empat),
-        Lima: safeValue(body.Lima),
-        Enam: safeValue(body.Enam),
-        Tujuh: safeValue(body.Tujuh),
-        Delapan: safeValue(body.Delapan),
-        Sembilan: safeValue(body.Sembilan),
-        Sepuluh: safeValue(body.Sepuluh),
-        Sebelas: safeValue(body.Sebelas),
-        Duabelas: safeValue(body.Duabelas)
-      };
-
-      // =======================================================
-      // SELECT TEMPLATE
-      // =======================================================
-
-      const templateName =
-        String(template || "Reguler")
+        String(body.template || "Reguler")
           .trim()
           .toLowerCase();
 
-      const isPrekursor =
-        templateName === "prekursor";
 
-      const selectedTemplate =
-        isPrekursor
-          ? "Prekursor"
-          : "Reguler";
+      let templateUrl = REGULER_TEMPLATE_URL;
+      let templateName = "Reguler";
 
-      const templateURL =
-        isPrekursor
-          ? PREKURSOR_TEMPLATE_URL
-          : REGULER_TEMPLATE_URL;
 
-      // =======================================================
-      // LOAD HTML FROM GITHUB
-      // =======================================================
+      if (template === "prekursor") {
+        templateUrl = PREKURSOR_TEMPLATE_URL;
+        templateName = "Prekursor";
+      }
+
+
+      // ===================================================
+      // DATA
+      // ===================================================
+
+      const values = {
+
+        Satu: body.Satu ?? "",
+        Dua: body.Dua ?? "",
+        Tiga: body.Tiga ?? "",
+        Empat: body.Empat ?? "",
+        Lima: body.Lima ?? "",
+        Enam: body.Enam ?? "",
+        Tujuh: body.Tujuh ?? "",
+        Delapan: body.Delapan ?? "",
+        Sembilan: body.Sembilan ?? "",
+        Sepuluh: body.Sepuluh ?? "",
+        Sebelas: body.Sebelas ?? "",
+        Duabelas: body.Duabelas ?? ""
+
+      };
+
+
+      // ===================================================
+      // LOAD HTML TEMPLATE
+      // ===================================================
 
       const templateResponse =
-        await fetch(templateURL);
+        await fetch(templateUrl);
+
 
       if (!templateResponse.ok) {
+
         throw new Error(
-          "Gagal mengambil template " +
-          selectedTemplate +
-          ".html dari GitHub. HTTP " +
+          "Template " +
+          templateName +
+          ".html tidak ditemukan di GitHub. HTTP " +
           templateResponse.status
         );
+
       }
+
 
       let html =
         await templateResponse.text();
 
-      // =======================================================
-      // REPLACE DATA
-      // =======================================================
+
+      // ===================================================
+      // REPLACE Satu - Duabelas
+      // ===================================================
 
       html =
         replaceTemplateValues(
@@ -139,83 +134,103 @@ export default {
           values
         );
 
-      // =======================================================
-      // PREKURSOR MASTER LOOKUP
-      // =======================================================
 
-      let prekursorData = [];
+      // ===================================================
+      // TTD
+      // ===================================================
 
-      if (isPrekursor) {
+      if (body.ttdBase64) {
 
-        const csvResponse =
-          await fetch(
-            MASTER_PREKURSOR_URL
+        html =
+          injectImage(
+            html,
+            "TTD",
+            body.ttdBase64
           );
 
-        if (!csvResponse.ok) {
-          throw new Error(
-            "Gagal mengambil master_prekursor.csv. HTTP " +
-            csvResponse.status
+      }
+
+
+      // ===================================================
+      // STEMPEL
+      // ===================================================
+
+      if (body.stempelBase64) {
+
+        html =
+          injectImage(
+            html,
+            "STEMPEL",
+            body.stempelBase64
           );
-        }
 
-        const csvText =
-          await csvResponse.text();
+      }
 
-        prekursorData =
-          parsePrekursorCSV(
-            csvText
-          );
 
-        // -----------------------------------------------------
-        // Masukkan master data ke HTML sebagai variable JS
-        // -----------------------------------------------------
+      // ===================================================
+      // PREKURSOR
+      // =====================================================
+
+      let prekursorCount = 0;
+
+
+      if (templateName === "Prekursor") {
+
+        const rows =
+          await loadPrekursorMaster();
+
+
+        prekursorCount =
+          rows.length;
+
 
         html =
           injectPrekursorData(
             html,
-            prekursorData
+            rows
           );
+
       }
 
-      // =======================================================
-      // TTD + STEMPEL
-      // =======================================================
+
+      // ===================================================
+      // A4 PRINT CSS
+      // ===================================================
 
       html =
-        injectSignatureAndStamp(
-          html,
-          ttdBase64,
-          stempelBase64
-        );
+        addA4PrintCSS(html);
 
-      // =======================================================
-      // CHECK BROWSER BINDING
-      // =======================================================
+
+      // ===================================================
+      // BROWSER CHECK
+      // ===================================================
 
       if (!env.BROWSER) {
+
         throw new Error(
-          "Cloudflare Browser binding BROWSER tidak ditemukan."
+          "BROWSER binding tidak tersedia di Cloudflare."
         );
+
       }
 
-      // =======================================================
+
+      // ===================================================
       // LAUNCH BROWSER
-      // =======================================================
+      // ===================================================
 
       const browser =
         await puppeteer.launch(
           env.BROWSER
         );
 
+
       try {
 
         const page =
           await browser.newPage();
 
-        // =====================================================
-        // VIEWPORT
-        // =====================================================
+
+        // A4 viewport
 
         await page.setViewport({
           width: 794,
@@ -223,9 +238,10 @@ export default {
           deviceScaleFactor: 1
         });
 
-        // =====================================================
+
+        // =================================================
         // LOAD HTML
-        // =====================================================
+        // =================================================
 
         await page.setContent(
           html,
@@ -234,12 +250,14 @@ export default {
           }
         );
 
-        // =====================================================
-        // PRINT A4
-        // =====================================================
+
+        // =================================================
+        // GENERATE PDF A4
+        // =================================================
 
         const pdfBytes =
           await page.pdf({
+
             format: "A4",
 
             printBackground: true,
@@ -252,34 +270,30 @@ export default {
               bottom: "0mm",
               left: "0mm"
             }
+
           });
 
-        // =====================================================
+
+        // =================================================
         // RESPONSE
-        // =====================================================
+        // =================================================
 
         return jsonResponse({
+
           success: true,
 
-          worker:
-            "suratpesanan-guardian",
-
-          template:
-            selectedTemplate,
-
-          templateURL:
-            templateURL,
+          template: templateName,
 
           prekursorLookup:
-            isPrekursor
-              ? prekursorData.length
-              : 0,
+            prekursorCount,
 
           pdfBase64:
             uint8ArrayToBase64(
-              pdfBytes
+              new Uint8Array(pdfBytes)
             )
+
         });
+
 
       } finally {
 
@@ -287,64 +301,49 @@ export default {
 
       }
 
+
     } catch (error) {
 
-      return jsonResponse(
-        {
-          success: false,
+      return jsonResponse({
 
-          error:
-            error?.message ||
-            String(error),
+        success: false,
 
-          stack:
-            error?.stack ||
-            null
-        },
-        500
-      );
+        error:
+          error?.message ||
+          String(error)
+
+      }, 500);
+
     }
+
   }
 };
 
 
-// =============================================================
-// SAFE VALUE
-// =============================================================
-
-function safeValue(value) {
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
-
-  return String(value);
-}
-
-
-// =============================================================
+// =========================================================
 // REPLACE TEMPLATE VALUES
-// =============================================================
+// =========================================================
 
 function replaceTemplateValues(
   html,
   values
 ) {
 
-  let result =
-    String(html);
+  let result = html;
+
 
   for (
     const [key, value]
     of Object.entries(values)
   ) {
 
-    // =========================================================
+    const safeValue =
+      escapeHtml(
+        String(value ?? "")
+      );
+
+
     // {{Satu}}
-    // =========================================================
 
     result =
       result.replace(
@@ -354,12 +353,11 @@ function replaceTemplateValues(
           "\\s*\\}\\}",
           "gi"
         ),
-        escapeHtml(value)
+        safeValue
       );
 
-    // =========================================================
+
     // [[Satu]]
-    // =========================================================
 
     result =
       result.replace(
@@ -369,292 +367,192 @@ function replaceTemplateValues(
           "\\s*\\]\\]",
           "gi"
         ),
-        escapeHtml(value)
+        safeValue
       );
 
-    // =========================================================
-    // ${Satu}
-    // =========================================================
+
+    // {{ Satu }}
 
     result =
       result.replace(
         new RegExp(
-          "\\$\\{\\s*" +
+          "\\{\\{\\s*" +
           escapeRegExp(key) +
-          "\\s*\\}",
+          "\\s*\\}\\}",
           "gi"
         ),
-        escapeHtml(value)
+        safeValue
       );
+
   }
+
 
   return result;
 }
 
 
-// =============================================================
-// PREKURSOR DATA
-// =============================================================
+// =========================================================
+// IMAGE INJECTION
+// =========================================================
 
-function injectPrekursorData(
+function injectImage(
   html,
-  data
+  placeholder,
+  base64
 ) {
 
-  const safeJSON =
-    JSON.stringify(data)
-      .replace(
-        /</g,
-        "\\u003c"
-      )
-      .replace(
-        />/g,
-        "\\u003e"
-      )
-      .replace(
-        /&/g,
-        "\\u0026"
-      );
-
-  const script = `
-<script>
-window.PREKURSOR_DATA = ${safeJSON};
-</script>
-`;
-
-  if (
-    html.includes("</head>")
-  ) {
-
-    return html.replace(
-      "</head>",
-      script + "</head>"
-    );
-  }
-
-  return script + html;
-}
-
-
-// =============================================================
-// TTD + STEMPEL
-// =============================================================
-
-function injectSignatureAndStamp(
-  html,
-  ttdBase64,
-  stempelBase64
-) {
-
-  if (
-    !ttdBase64 &&
-    !stempelBase64
-  ) {
+  if (!base64) {
     return html;
   }
 
-  const ttd =
-    normalizeImageBase64(
-      ttdBase64
+
+  const imageSrc =
+    normalizeImageBase64(base64);
+
+
+  const imageHtml =
+    '<img src="' +
+    imageSrc +
+    '" class="sp-' +
+    placeholder.toLowerCase() +
+    '" />';
+
+
+  return html
+
+    .replace(
+      new RegExp(
+        "\\{\\{\\s*" +
+        placeholder +
+        "\\s*\\}\\}",
+        "gi"
+      ),
+      imageHtml
+    )
+
+    .replace(
+      new RegExp(
+        "\\[\\[\\s*" +
+        placeholder +
+        "\\s*\\]\\]",
+        "gi"
+      ),
+      imageHtml
     );
 
-  const stempel =
-    normalizeImageBase64(
-      stempelBase64
-    );
-
-  let block = `
-<div
-  id="sp-signature-block"
-  style="
-    position:absolute;
-    right:30mm;
-    bottom:20mm;
-    width:70mm;
-    height:40mm;
-    z-index:99999;
-    pointer-events:none;
-  "
->
-`;
-
-  // ===========================================================
-  // STEMPEL
-  // ===========================================================
-
-  if (stempel) {
-
-    block += `
-<img
-  src="${stempel}"
-  style="
-    position:absolute;
-    left:0;
-    bottom:0;
-    width:32mm;
-    height:32mm;
-    object-fit:contain;
-  "
->
-`;
-  }
-
-  // ===========================================================
-  // TTD
-  // ===========================================================
-
-  if (ttd) {
-
-    block += `
-<img
-  src="${ttd}"
-  style="
-    position:absolute;
-    left:16mm;
-    bottom:8mm;
-    width:45mm;
-    height:23mm;
-    object-fit:contain;
-  "
->
-`;
-  }
-
-  block += `
-</div>
-`;
-
-  // ===========================================================
-  // INSERT INTO BODY
-  // ===========================================================
-
-  if (
-    html.includes("</body>")
-  ) {
-
-    return html.replace(
-      "</body>",
-      block + "</body>"
-    );
-  }
-
-  return html + block;
 }
 
 
-// =============================================================
-// IMAGE BASE64
-// =============================================================
+// =========================================================
+// NORMALIZE IMAGE
+// =========================================================
 
 function normalizeImageBase64(
-  value
+  base64
 ) {
 
-  if (!value) {
-    return "";
-  }
+  const value =
+    String(base64).trim();
 
-  let clean =
-    String(value).trim();
-
-  // ===========================================================
-  // Already data URI
-  // ===========================================================
 
   if (
-    clean.startsWith(
-      "data:image/"
-    )
+    /^data:image\//i.test(value)
   ) {
-    return clean;
+
+    return value;
+
   }
 
-  // ===========================================================
-  // Remove possible prefix
-  // ===========================================================
 
-  clean =
-    clean.replace(
-      /^data:image\/[^;]+;base64,/i,
-      ""
+  if (
+    value.startsWith("iVBOR")
+  ) {
+
+    return (
+      "data:image/png;base64," +
+      value
     );
 
-  try {
-
-    const bytes =
-      base64ToUint8Array(
-        clean
-      );
-
-    // =========================================================
-    // PNG
-    // =========================================================
-
-    if (
-      bytes[0] === 0x89 &&
-      bytes[1] === 0x50 &&
-      bytes[2] === 0x4e &&
-      bytes[3] === 0x47
-    ) {
-
-      return (
-        "data:image/png;base64," +
-        clean
-      );
-    }
-
-    // =========================================================
-    // JPEG
-    // =========================================================
-
-    if (
-      bytes[0] === 0xff &&
-      bytes[1] === 0xd8
-    ) {
-
-      return (
-        "data:image/jpeg;base64," +
-        clean
-      );
-    }
-
-  } catch {
-
-    return "";
   }
 
-  return "";
+
+  if (
+    value.startsWith("/9j/")
+  ) {
+
+    return (
+      "data:image/jpeg;base64," +
+      value
+    );
+
+  }
+
+
+  return (
+    "data:image/png;base64," +
+    value
+  );
+
 }
 
 
-// =============================================================
-// PREKURSOR CSV
-// =============================================================
+// =========================================================
+// PREKURSOR MASTER
+// =========================================================
 
-function parsePrekursorCSV(
-  csv
-) {
+async function loadPrekursorMaster() {
+
+  const response =
+    await fetch(
+      MASTER_PREKURSOR_URL
+    );
+
+
+  if (!response.ok) {
+
+    throw new Error(
+      "Gagal mengambil master_prekursor.csv. HTTP " +
+      response.status
+    );
+
+  }
+
+
+  const csv =
+    await response.text();
+
+
+  return parseCSV(csv);
+
+}
+
+
+// =========================================================
+// CSV PARSER
+// =========================================================
+
+function parseCSV(csv) {
 
   const lines =
-    String(csv)
+    csv
       .split(/\r?\n/)
       .filter(
         line =>
           line.trim() !== ""
       );
 
-  if (
-    lines.length < 2
-  ) {
+
+  if (lines.length < 2) {
     return [];
   }
 
+
   const headers =
-    parseCSVLine(
-      lines[0]
-    );
+    parseCSVLine(lines[0]);
+
 
   const result = [];
+
 
   for (
     let i = 1;
@@ -663,40 +561,46 @@ function parsePrekursorCSV(
   ) {
 
     const columns =
-      parseCSVLine(
-        lines[i]
-      );
+      parseCSVLine(lines[i]);
+
 
     const row = {};
+
 
     headers.forEach(
       (header, index) => {
 
-        row[header] =
-          columns[index] ??
-          "";
+        row[
+          header.trim()
+        ] =
+          columns[index] ?? "";
+
       }
     );
 
+
     result.push(row);
+
   }
 
+
   return result;
+
 }
 
 
-// =============================================================
+// =========================================================
 // CSV LINE
-// =============================================================
+// =========================================================
 
-function parseCSVLine(
-  line
-) {
+function parseCSVLine(line) {
 
   const result = [];
 
   let current = "";
+
   let insideQuotes = false;
+
 
   for (
     let i = 0;
@@ -707,9 +611,8 @@ function parseCSVLine(
     const char =
       line[i];
 
-    if (
-      char === '"'
-    ) {
+
+    if (char === '"') {
 
       if (
         insideQuotes &&
@@ -717,13 +620,16 @@ function parseCSVLine(
       ) {
 
         current += '"';
+
         i++;
 
       } else {
 
         insideQuotes =
           !insideQuotes;
+
       }
+
 
     } else if (
       char === "," &&
@@ -736,64 +642,174 @@ function parseCSVLine(
 
       current = "";
 
+
     } else {
 
       current += char;
+
     }
+
   }
+
 
   result.push(
     current.trim()
   );
 
+
   return result;
+
 }
 
 
-// =============================================================
-// BASE64 -> UINT8ARRAY
-// =============================================================
+// =========================================================
+// PREKURSOR HTML
+// =========================================================
 
-function base64ToUint8Array(
-  base64
+function injectPrekursorData(
+  html,
+  rows
 ) {
 
-  const clean =
-    String(base64)
-      .replace(
-        /^data:.*?;base64,/i,
-        ""
-      )
-      .replace(
-        /\s/g,
-        ""
-      );
-
-  const binary =
-    atob(clean);
-
-  const bytes =
-    new Uint8Array(
-      binary.length
+  html =
+    html.replace(
+      /\{\{\s*PREKURSOR_COUNT\s*\}\}/gi,
+      String(rows.length)
     );
 
-  for (
-    let i = 0;
-    i < binary.length;
-    i++
-  ) {
 
-    bytes[i] =
-      binary.charCodeAt(i);
-  }
+  return html;
 
-  return bytes;
 }
 
 
-// =============================================================
+// =========================================================
+// A4 CSS
+// =========================================================
+
+function addA4PrintCSS(
+  html
+) {
+
+  const css =
+    "<style>" +
+
+    "@page {" +
+    "size: A4;" +
+    "margin: 0;" +
+    "}" +
+
+    "html, body {" +
+    "margin: 0;" +
+    "padding: 0;" +
+    "width: 210mm;" +
+    "min-height: 297mm;" +
+    "}" +
+
+    "* {" +
+    "box-sizing: border-box;" +
+    "}" +
+
+    ".sp-ttd {" +
+    "max-width: 170px;" +
+    "max-height: 90px;" +
+    "object-fit: contain;" +
+    "}" +
+
+    ".sp-stempel {" +
+    "max-width: 120px;" +
+    "max-height: 120px;" +
+    "object-fit: contain;" +
+    "}" +
+
+    "@media print {" +
+
+    "html, body {" +
+    "width: 210mm;" +
+    "margin: 0;" +
+    "padding: 0;" +
+    "}" +
+
+    "}" +
+
+    "</style>";
+
+
+  if (
+    html.includes("</head>")
+  ) {
+
+    return html.replace(
+      "</head>",
+      css + "</head>"
+    );
+
+  }
+
+
+  return css + html;
+
+}
+
+
+// =========================================================
+// ESCAPE HTML
+// =========================================================
+
+function escapeHtml(
+  value
+) {
+
+  return String(value)
+
+    .replace(
+      /&/g,
+      "&amp;"
+    )
+
+    .replace(
+      /</g,
+      "&lt;"
+    )
+
+    .replace(
+      />/g,
+      "&gt;"
+    )
+
+    .replace(
+      /"/g,
+      "&quot;"
+    )
+
+    .replace(
+      /'/g,
+      "&#039;"
+    );
+
+}
+
+
+// =========================================================
+// ESCAPE REGEX
+// =========================================================
+
+function escapeRegExp(
+  value
+) {
+
+  return String(value)
+    .replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+}
+
+
+// =========================================================
 // UINT8ARRAY -> BASE64
-// =============================================================
+// =========================================================
 
 function uint8ArrayToBase64(
   bytes
@@ -803,6 +819,7 @@ function uint8ArrayToBase64(
 
   const chunkSize =
     0x8000;
+
 
   for (
     let i = 0;
@@ -820,63 +837,18 @@ function uint8ArrayToBase64(
           )
         )
       );
+
   }
 
+
   return btoa(binary);
+
 }
 
 
-// =============================================================
-// HTML ESCAPE
-// =============================================================
-
-function escapeHtml(
-  value
-) {
-
-  return String(value)
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-    .replace(
-      /</g,
-      "&lt;"
-    )
-    .replace(
-      />/g,
-      "&gt;"
-    )
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-    .replace(
-      /'/g,
-      "&#039;"
-    );
-}
-
-
-// =============================================================
-// REGEX ESCAPE
-// =============================================================
-
-function escapeRegExp(
-  value
-) {
-
-  return String(value)
-    .replace(
-      /[.*+?^${}()|[\]\\]/g,
-      "\\$&"
-    );
-}
-
-
-// =============================================================
+// =========================================================
 // JSON RESPONSE
-// =============================================================
+// =========================================================
 
 function jsonResponse(
   data,
@@ -889,9 +861,10 @@ function jsonResponse(
       status: status,
 
       headers: {
-        "Content-Type":
+        "content-type":
           "application/json; charset=UTF-8"
       }
     }
   );
+
 }
