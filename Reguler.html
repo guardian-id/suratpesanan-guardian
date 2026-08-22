@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>SP GUARDIAN</title>
+
+    <style>
+        /* ================================
+           SETTING HALAMAN PRINT
+           ================================ */
+        @page {
+            size: A4 portrait;
+            margin: 0;
+        }
+
+        /* ================================
+           RESET
+           ================================ */
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 210mm;
+            min-height: 297mm;
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            background: #ffffff;
+        }
+
+        /* ================================
+           CONTAINER A4
+           ================================ */
+        .a4-container {
+            position: relative;
+
+            width: 210mm;
+            height: 297mm;
+
+            padding: 10mm;
+
+            box-sizing: border-box;
+
+            overflow: hidden;
+
+            background: #ffffff;
+        }
+
+        /* ================================
+           TABLE
+           ================================ */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 10px;
+        }
+
+        td,
+        th {
+            border: 1px solid #000000;
+            padding: 6px;
+            vertical-align: top;
+        }
+
+        /* ================================
+           TEXT
+           ================================ */
+        .section-title {
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+
+        .note {
+            font-size: 12px;
+            color: #555555;
+        }
+
+        .font1 {
+            font-size: 12px;
+        }
+
+        .font2 {
+            font-size: 14px;
+        }
+
+        .font3 {
+            font-size: 10px;
+        }
+
+        /* ================================
+           SIGNATURE
+           ================================ */
+        .signature {
+            height: 70px;
+        }
+
+        .signature2 {
+            height: 40px;
+            width: 500px;
+        }
+
+        /* ================================
+           PRINT
+           ================================ */
+        @media print {
+            html,
+            body {
+                width: 210mm;
+                height: 297mm;
+                margin: 0;
+                padding: 0;
+            }
+
+            .a4-container {
+                width: 210mm;
+                height: 297mm;
+                margin: 0;
+                padding: 10mm;
+                page-break-after: always;
+            }
+
+            /* Jangan tampilkan elemen yang ditandai no-print */
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="a4-container">
+    <!-- Header Information -->
+    <div style="text-align: center;" class="font2">{{Satu}}</div>
+    <div style="text-align: center;" class="font1">{{Dua}}}</div>
+    <div style="text-align: center;" class="font1">{{Tiga}}</div>
+    <hr style="height: 2px; border: none; background-color: black;">
+    <div style="text-align: center;" class="font1"><b><u>{{Empat}}</u></b></div>
+    <div style="text-align: center;" class="font1">No SP: {{Lima}}</div>
+    <p class="font3">Yang Bertanda tangan dibawah ini:</p>
+    <div class="font3"><pre>Nama                     : {{Enam}}</pre></div>
+    <div class="font3"><pre>Jabatan                  : {{Tujuh}}</pre></div>
+    <div class="font3"><pre>Nomor SIPA               : {{Delapan}}</pre></div>
+    <div class="font3"><pre>Nomor SIA                : {{Sembilan}}</pre></div>
+    <div class="font3">Mengajukan pesanan obat kepada:</div>
+    <div class="font3"><pre>Nama PBF                 : PT. DFI RETAIL NUSANTARA TBK</pre></div>
+    <div class="font3"><pre>Alamat PBF               : Jl. Indofarma arteri Tol Cibitung Kp.Cikedokan,  Desa/Kelurahan Sukadanau, Kec. Cikarang Barat, Kab. Bekasi,
+                           Provinsi Jawa Barat,Kode Pos: 17530</pre></div>
+    <div class="font3"><pre>Telp                     : 021-83788000</pre></div>
+    <div class="font3"><pre>No Sertifikat Distribusi : {{Sepuluh}}</pre></div>
+    <!-- Table of ordered medicines -->
+    {{TablePDF}}
+    <p class="font3">{{Sebelas}}</p>
+    <div style="position: relative; width: 150px; height: 100px;">
+{outputs('TTD')}
+{outputs('Stemp')}
+</div>
+    <div class="font3">{{Enam}}</div>
+    <div class="font3">No SIPA: {{Sembilan}}</div>
+</div>
+
+</body>
+</html>
