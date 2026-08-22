@@ -1,67 +1,61 @@
 import puppeteer from "@cloudflare/puppeteer";
 
-const GITHUB_RAW_BASE =
-  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
-
 const REGULER_HTML_URL =
-  GITHUB_RAW_BASE + "/Reguler.html";
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.html";
 
 export default {
   async fetch(request, env) {
 
-    // ==========================================================
-    // GET - HEALTH CHECK
-    // ==========================================================
+    // ================================
+    // HEALTH CHECK
+    // ================================
 
     if (request.method === "GET") {
-      return jsonResponse({
-        success: true,
-        message: "SP GUARDIAN WORKER OK",
-        version: "REGULER-HTML-1"
-      });
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "SP GUARDIAN WORKER OK",
+          version: "REGULER-ONLY"
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      );
     }
 
-    // ==========================================================
+    // ================================
     // ONLY POST
-    // ==========================================================
+    // ================================
 
     if (request.method !== "POST") {
-      return jsonResponse(
-        {
+      return new Response(
+        JSON.stringify({
           success: false,
           error: "Method not allowed"
-        },
-        405
+        }),
+        {
+          status: 405,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
       );
     }
 
     try {
 
-      // ========================================================
+      // ================================
       // READ JSON
-      // ========================================================
+      // ================================
 
       const body = await request.json();
 
-      if (!body || typeof body !== "object") {
-        return jsonResponse(
-          {
-            success: false,
-            error: "Invalid JSON body"
-          },
-          400
-        );
-      }
-
-      // ========================================================
-      // INPUT
-      // ========================================================
-
-      const ttdBase64 =
-        body.ttdBase64 || "";
-
-      const stempelBase64 =
-        body.stempelBase64 || "";
+      // ================================
+      // VALUES
+      // ================================
 
       const values = {
         Satu: body.Satu ?? "",
@@ -78,61 +72,63 @@ export default {
         Duabelas: body.Duabelas ?? ""
       };
 
-      // ========================================================
-      // LOAD REGULER.HTML FROM GITHUB
-      // ========================================================
+      const ttdBase64 =
+        body.ttdBase64 || "";
 
-      const templateResponse =
+      const stempelBase64 =
+        body.stempelBase64 || "";
+
+      // ================================
+      // DOWNLOAD HTML
+      // ================================
+
+      const response =
         await fetch(REGULER_HTML_URL);
 
-      if (!templateResponse.ok) {
+      if (!response.ok) {
         throw new Error(
-          "Gagal mengambil Reguler.html. HTTP " +
-          templateResponse.status
+          "Reguler.html gagal diambil. HTTP " +
+          response.status
         );
       }
 
       let html =
-        await templateResponse.text();
+        await response.text();
 
-      // ========================================================
+      // ================================
       // REPLACE PLACEHOLDERS
-      // Support:
-      // {{Satu}}
-      // [[Satu]]
-      // ${Satu}
-      // ========================================================
+      // ================================
 
       html =
-        replaceTemplateValues(
+        replaceValues(
           html,
           values
         );
 
-      // ========================================================
-      // INSERT TTD + STEMPEL
-      // ========================================================
+      // ================================
+      // ADD TTD + STEMPEL
+      // ================================
 
       html =
-        insertSignatureAndStamp(
+        addSignature(
           html,
           ttdBase64,
           stempelBase64
         );
 
-      // ========================================================
+      // ================================
       // CHECK BROWSER
-      // ========================================================
+      // ================================
 
       if (!env.BROWSER) {
         throw new Error(
-          "BROWSER binding tidak ditemukan. Periksa konfigurasi Cloudflare."
+          "BROWSER binding tidak ditemukan."
         );
       }
 
-      // ========================================================
-      // LAUNCH BROWSER
-      // ========================================================
+      // ================================
+      // START BROWSER
+      // ================================
 
       const browser =
         await puppeteer.launch(
@@ -141,16 +137,12 @@ export default {
 
       try {
 
-        // ======================================================
-        // NEW PAGE
-        // ======================================================
-
         const page =
           await browser.newPage();
 
-        // ======================================================
-        // VIEWPORT
-        // ======================================================
+        // ==============================
+        // A4
+        // ==============================
 
         await page.setViewport({
           width: 794,
@@ -158,9 +150,9 @@ export default {
           deviceScaleFactor: 1
         });
 
-        // ======================================================
-        // LOAD HTML
-        // ======================================================
+        // ==============================
+        // HTML
+        // ==============================
 
         await page.setContent(
           html,
@@ -169,80 +161,81 @@ export default {
           }
         );
 
-        // ======================================================
-        // GENERATE A4 PDF
-        // ======================================================
+        // ==============================
+        // PDF
+        // ==============================
 
-        const pdfBytes =
+        const pdf =
           await page.pdf({
             format: "A4",
-
             printBackground: true,
-
             margin: {
               top: "0mm",
               right: "0mm",
               bottom: "0mm",
               left: "0mm"
             },
-
             preferCSSPageSize: true
           });
 
-        // ======================================================
-        // CLOSE BROWSER
-        // ======================================================
-
         await browser.close();
 
-        // ======================================================
-        // RETURN PDF BASE64
-        // ======================================================
+        // ==============================
+        // RESPONSE
+        // ==============================
 
-        return jsonResponse({
-          success: true,
+        return new Response(
+          JSON.stringify({
+            success: true,
+            template: "Reguler",
+            pdfBase64:
+              toBase64(pdf)
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type":
+                "application/json"
+            }
+          }
+        );
 
-          template: "Reguler",
-
-          pdfBase64:
-            uint8ArrayToBase64(pdfBytes)
-        });
-
-      } catch (browserError) {
+      } catch (error) {
 
         try {
           await browser.close();
         } catch (_) {}
 
-        throw browserError;
+        throw error;
       }
 
     } catch (error) {
 
-      return jsonResponse(
-        {
+      return new Response(
+        JSON.stringify({
           success: false,
-
           error:
             error?.message ||
-            String(error),
-
-          stack:
-            error?.stack ||
-            null
-        },
-        500
+            String(error)
+        }),
+        {
+          status: 500,
+          headers: {
+            "content-type":
+              "application/json"
+          }
+        }
       );
     }
   }
 };
 
 
-// ============================================================
-// REPLACE TEMPLATE VALUES
-// ============================================================
+// ========================================
+// REPLACE VALUES
+// ========================================
 
-function replaceTemplateValues(
+function replaceValues(
   html,
   values
 ) {
@@ -251,13 +244,12 @@ function replaceTemplateValues(
     String(html);
 
   for (
-    const [key, value]
-    of Object.entries(values)
+    const key in values
   ) {
 
-    const safeValue =
+    const value =
       escapeHtml(
-        String(value ?? "")
+        String(values[key] ?? "")
       );
 
     // {{Satu}}
@@ -269,7 +261,7 @@ function replaceTemplateValues(
           "\\}\\}",
           "gi"
         ),
-        safeValue
+        value
       );
 
     // [[Satu]]
@@ -281,7 +273,7 @@ function replaceTemplateValues(
           "\\]\\]",
           "gi"
         ),
-        safeValue
+        value
       );
 
     // ${Satu}
@@ -293,7 +285,7 @@ function replaceTemplateValues(
           "\\}",
           "gi"
         ),
-        safeValue
+        value
       );
   }
 
@@ -301,23 +293,23 @@ function replaceTemplateValues(
 }
 
 
-// ============================================================
-// INSERT TTD + STEMPEL
-// ============================================================
+// ========================================
+// TTD + STEMPEL
+// ========================================
 
-function insertSignatureAndStamp(
+function addSignature(
   html,
   ttdBase64,
   stempelBase64
 ) {
 
   const ttd =
-    normalizeImageBase64(
+    normalizeImage(
       ttdBase64
     );
 
   const stempel =
-    normalizeImageBase64(
+    normalizeImage(
       stempelBase64
     );
 
@@ -325,18 +317,17 @@ function insertSignatureAndStamp(
     return html;
   }
 
-  const signatureBlock = `
+  const block = `
 
 <style>
 
-.sp-signature-block {
+.sp-signature {
   position: absolute;
   right: 25mm;
   bottom: 22mm;
   width: 55mm;
   height: 35mm;
   z-index: 9999;
-  pointer-events: none;
 }
 
 .sp-stempel {
@@ -359,7 +350,7 @@ function insertSignatureAndStamp(
 
 </style>
 
-<div class="sp-signature-block">
+<div class="sp-signature">
 
 ${
   stempel
@@ -381,25 +372,25 @@ ${
 
 `;
 
-  if (html.includes("</body>")) {
-
+  if (
+    html.includes("</body>")
+  ) {
     return html.replace(
       "</body>",
-      signatureBlock +
+      block +
       "</body>"
     );
   }
 
-  return html +
-    signatureBlock;
+  return html + block;
 }
 
 
-// ============================================================
-// NORMALIZE IMAGE BASE64
-// ============================================================
+// ========================================
+// NORMALIZE IMAGE
+// ========================================
 
-function normalizeImageBase64(
+function normalizeImage(
   value
 ) {
 
@@ -425,34 +416,31 @@ function normalizeImageBase64(
 }
 
 
-// ============================================================
+// ========================================
 // HTML ESCAPE
-// ============================================================
+// ========================================
 
-function escapeHtml(value) {
+function escapeHtml(
+  value
+) {
 
   return String(value)
-
     .replace(
       /&/g,
       "&amp;"
     )
-
     .replace(
       /</g,
       "&lt;"
     )
-
     .replace(
       />/g,
       "&gt;"
     )
-
     .replace(
       /"/g,
       "&quot;"
     )
-
     .replace(
       /'/g,
       "&#039;"
@@ -460,11 +448,13 @@ function escapeHtml(value) {
 }
 
 
-// ============================================================
+// ========================================
 // REGEX ESCAPE
-// ============================================================
+// ========================================
 
-function escapeRegExp(value) {
+function escapeRegExp(
+  value
+) {
 
   return String(value)
     .replace(
@@ -474,11 +464,11 @@ function escapeRegExp(value) {
 }
 
 
-// ============================================================
-// UINT8 ARRAY → BASE64
-// ============================================================
+// ========================================
+// UINT8ARRAY TO BASE64
+// ========================================
 
-function uint8ArrayToBase64(
+function toBase64(
   bytes
 ) {
 
@@ -506,27 +496,4 @@ function uint8ArrayToBase64(
   }
 
   return btoa(binary);
-}
-
-
-// ============================================================
-// JSON RESPONSE
-// ============================================================
-
-function jsonResponse(
-  data,
-  status = 200
-) {
-
-  return new Response(
-    JSON.stringify(data),
-    {
-      status: status,
-
-      headers: {
-        "content-type":
-          "application/json; charset=UTF-8"
-      }
-    }
-  );
 }
