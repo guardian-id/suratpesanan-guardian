@@ -1,5 +1,4 @@
 import puppeteer from "@cloudflare/puppeteer";
-import { PDFDocument } from "pdf-lib";
 
 const GITHUB_RAW_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
@@ -7,22 +6,24 @@ const GITHUB_RAW_BASE =
 const REGULER_HTML_URL =
   GITHUB_RAW_BASE + "/Reguler.html";
 
-const PREKURSOR_HTML_URL =
-  GITHUB_RAW_BASE + "/Prekursor.html";
-
-const MASTER_PREKURSOR_URL =
-  GITHUB_RAW_BASE + "/master_prekursor.csv";
-
 export default {
   async fetch(request, env) {
+
+    // ==========================================================
+    // GET - HEALTH CHECK
+    // ==========================================================
 
     if (request.method === "GET") {
       return jsonResponse({
         success: true,
         message: "SP GUARDIAN WORKER OK",
-        version: "HTML-PDF-FINAL-2"
+        version: "REGULER-HTML-1"
       });
     }
+
+    // ==========================================================
+    // ONLY POST
+    // ==========================================================
 
     if (request.method !== "POST") {
       return jsonResponse(
@@ -36,6 +37,10 @@ export default {
 
     try {
 
+      // ========================================================
+      // READ JSON
+      // ========================================================
+
       const body = await request.json();
 
       if (!body || typeof body !== "object") {
@@ -48,16 +53,15 @@ export default {
         );
       }
 
+      // ========================================================
+      // INPUT
+      // ========================================================
+
       const ttdBase64 =
         body.ttdBase64 || "";
 
       const stempelBase64 =
         body.stempelBase64 || "";
-
-      const template =
-        String(body.template || "Reguler")
-          .trim()
-          .toLowerCase();
 
       const values = {
         Satu: body.Satu ?? "",
@@ -74,22 +78,16 @@ export default {
         Duabelas: body.Duabelas ?? ""
       };
 
-      let templateUrl = REGULER_HTML_URL;
-      let templateName = "Reguler";
-
-      if (template === "prekursor") {
-        templateUrl = PREKURSOR_HTML_URL;
-        templateName = "Prekursor";
-      }
+      // ========================================================
+      // LOAD REGULER.HTML FROM GITHUB
+      // ========================================================
 
       const templateResponse =
-        await fetch(templateUrl);
+        await fetch(REGULER_HTML_URL);
 
       if (!templateResponse.ok) {
         throw new Error(
-          "Gagal mengambil template " +
-          templateName +
-          ".html. HTTP " +
+          "Gagal mengambil Reguler.html. HTTP " +
           templateResponse.status
         );
       }
@@ -97,18 +95,23 @@ export default {
       let html =
         await templateResponse.text();
 
-      let prekursorLookup = [];
-
-      if (templateName === "Prekursor") {
-        prekursorLookup =
-          await loadPrekursorMaster();
-      }
+      // ========================================================
+      // REPLACE PLACEHOLDERS
+      // Support:
+      // {{Satu}}
+      // [[Satu]]
+      // ${Satu}
+      // ========================================================
 
       html =
         replaceTemplateValues(
           html,
           values
         );
+
+      // ========================================================
+      // INSERT TTD + STEMPEL
+      // ========================================================
 
       html =
         insertSignatureAndStamp(
@@ -117,11 +120,19 @@ export default {
           stempelBase64
         );
 
+      // ========================================================
+      // CHECK BROWSER
+      // ========================================================
+
       if (!env.BROWSER) {
         throw new Error(
-          "BROWSER binding tidak ditemukan. Periksa wrangler.json."
+          "BROWSER binding tidak ditemukan. Periksa konfigurasi Cloudflare."
         );
       }
+
+      // ========================================================
+      // LAUNCH BROWSER
+      // ========================================================
 
       const browser =
         await puppeteer.launch(
@@ -130,14 +141,26 @@ export default {
 
       try {
 
+        // ======================================================
+        // NEW PAGE
+        // ======================================================
+
         const page =
           await browser.newPage();
+
+        // ======================================================
+        // VIEWPORT
+        // ======================================================
 
         await page.setViewport({
           width: 794,
           height: 1123,
           deviceScaleFactor: 1
         });
+
+        // ======================================================
+        // LOAD HTML
+        // ======================================================
 
         await page.setContent(
           html,
@@ -146,38 +169,43 @@ export default {
           }
         );
 
-        const generatedPdf =
+        // ======================================================
+        // GENERATE A4 PDF
+        // ======================================================
+
+        const pdfBytes =
           await page.pdf({
             format: "A4",
+
             printBackground: true,
+
             margin: {
               top: "0mm",
               right: "0mm",
               bottom: "0mm",
               left: "0mm"
             },
+
             preferCSSPageSize: true
           });
 
-        const pdfDoc =
-          await PDFDocument.load(
-            generatedPdf
-          );
-
-        const finalPdf =
-          await pdfDoc.save();
+        // ======================================================
+        // CLOSE BROWSER
+        // ======================================================
 
         await browser.close();
 
+        // ======================================================
+        // RETURN PDF BASE64
+        // ======================================================
+
         return jsonResponse({
           success: true,
-          template: templateName,
-          pageCount:
-            pdfDoc.getPageCount(),
-          prekursorLookup:
-            prekursorLookup.length,
+
+          template: "Reguler",
+
           pdfBase64:
-            uint8ArrayToBase64(finalPdf)
+            uint8ArrayToBase64(pdfBytes)
         });
 
       } catch (browserError) {
@@ -194,9 +222,11 @@ export default {
       return jsonResponse(
         {
           success: false,
+
           error:
             error?.message ||
             String(error),
+
           stack:
             error?.stack ||
             null
@@ -230,6 +260,7 @@ function replaceTemplateValues(
         String(value ?? "")
       );
 
+    // {{Satu}}
     result =
       result.replace(
         new RegExp(
@@ -241,6 +272,7 @@ function replaceTemplateValues(
         safeValue
       );
 
+    // [[Satu]]
     result =
       result.replace(
         new RegExp(
@@ -252,6 +284,7 @@ function replaceTemplateValues(
         safeValue
       );
 
+    // ${Satu}
     result =
       result.replace(
         new RegExp(
@@ -293,7 +326,9 @@ function insertSignatureAndStamp(
   }
 
   const signatureBlock = `
+
 <style>
+
 .sp-signature-block {
   position: absolute;
   right: 25mm;
@@ -321,9 +356,11 @@ function insertSignatureAndStamp(
   height: 22mm;
   object-fit: contain;
 }
+
 </style>
 
 <div class="sp-signature-block">
+
 ${
   stempel
     ? '<img class="sp-stempel" src="' +
@@ -331,6 +368,7 @@ ${
       '">'
     : ''
 }
+
 ${
   ttd
     ? '<img class="sp-ttd" src="' +
@@ -338,12 +376,12 @@ ${
       '">'
     : ''
 }
+
 </div>
+
 `;
 
-  if (
-    html.includes("</body>")
-  ) {
+  if (html.includes("</body>")) {
 
     return html.replace(
       "</body>",
@@ -358,148 +396,7 @@ ${
 
 
 // ============================================================
-// PREKURSOR MASTER
-// ============================================================
-
-async function loadPrekursorMaster() {
-
-  const response =
-    await fetch(
-      MASTER_PREKURSOR_URL
-    );
-
-  if (!response.ok) {
-
-    throw new Error(
-      "Failed to load master_prekursor.csv. HTTP " +
-      response.status
-    );
-  }
-
-  const csv =
-    await response.text();
-
-  return parseCsv(csv);
-}
-
-
-// ============================================================
-// CSV PARSER
-// ============================================================
-
-function parseCsv(csv) {
-
-  const lines =
-    String(csv)
-      .split(/\r?\n/)
-      .filter(
-        line =>
-          line.trim() !== ""
-      );
-
-  if (lines.length < 2) {
-    return [];
-  }
-
-  const headers =
-    parseCsvLine(
-      lines[0]
-    );
-
-  const result = [];
-
-  for (
-    let i = 1;
-    i < lines.length;
-    i++
-  ) {
-
-    const columns =
-      parseCsvLine(
-        lines[i]
-      );
-
-    const row = {};
-
-    for (
-      let j = 0;
-      j < headers.length;
-      j++
-    ) {
-
-      row[headers[j]] =
-        columns[j] ?? "";
-    }
-
-    result.push(row);
-  }
-
-  return result;
-}
-
-
-// ============================================================
-// CSV LINE
-// ============================================================
-
-function parseCsvLine(line) {
-
-  const result = [];
-
-  let current = "";
-  let quoted = false;
-
-  for (
-    let i = 0;
-    i < line.length;
-    i++
-  ) {
-
-    const char =
-      line[i];
-
-    if (char === '"') {
-
-      if (
-        quoted &&
-        line[i + 1] === '"'
-      ) {
-
-        current += '"';
-        i++;
-
-      } else {
-
-        quoted = !quoted;
-      }
-
-    } else if (
-      char === "," &&
-      !quoted
-    ) {
-
-      result.push(
-        current.trim()
-      );
-
-      current = "";
-
-    } else {
-
-      current += char;
-    }
-  }
-
-  result.push(
-    current.trim()
-  );
-
-  return result;
-}
-
-
-// ============================================================
-// IMAGE BASE64 NORMALIZER
+// NORMALIZE IMAGE BASE64
 // ============================================================
 
 function normalizeImageBase64(
@@ -518,7 +415,6 @@ function normalizeImageBase64(
       "data:image/"
     )
   ) {
-
     return text;
   }
 
@@ -536,22 +432,27 @@ function normalizeImageBase64(
 function escapeHtml(value) {
 
   return String(value)
+
     .replace(
       /&/g,
       "&amp;"
     )
+
     .replace(
       /</g,
       "&lt;"
     )
+
     .replace(
       />/g,
       "&gt;"
     )
+
     .replace(
       /"/g,
       "&quot;"
     )
+
     .replace(
       /'/g,
       "&#039;"
@@ -621,6 +522,7 @@ function jsonResponse(
     JSON.stringify(data),
     {
       status: status,
+
       headers: {
         "content-type":
           "application/json; charset=UTF-8"
