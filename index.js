@@ -1,5 +1,5 @@
-```javascript
-import { getDocument } from "pdfjs-serverless";
+import puppeteer from "@cloudflare/puppeteer";
+import { PDFDocument } from "pdf-lib";
 
 const GITHUB_RAW_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
@@ -15,22 +15,19 @@ const MASTER_PREKURSOR_URL =
 
 
 export default {
-
   async fetch(request, env) {
 
     // =========================================================
-    // GET = HEALTH CHECK
+    // GET - HEALTH CHECK
     // =========================================================
 
     if (request.method === "GET") {
-
       return jsonResponse({
         success: true,
         message: "SP GUARDIAN WORKER OK",
         worker: "suratpesanan-guardian",
-        version: "FINAL-HTML-1"
+        version: "FINAL-HTML-2-TEMPLATE"
       });
-
     }
 
 
@@ -39,12 +36,10 @@ export default {
     // =========================================================
 
     if (request.method !== "POST") {
-
       return jsonResponse({
         success: false,
         error: "Method not allowed"
       }, 405);
-
     }
 
 
@@ -58,12 +53,10 @@ export default {
 
 
       if (!body || typeof body !== "object") {
-
         return jsonResponse({
           success: false,
           error: "Invalid request body"
         }, 400);
-
       }
 
 
@@ -72,7 +65,6 @@ export default {
       // =======================================================
 
       const {
-
         pdfBase64,
         ttdBase64,
         stempelBase64,
@@ -90,365 +82,384 @@ export default {
         Sepuluh,
         Sebelas,
         Duabelas
-
       } = body;
-
-
-      if (!pdfBase64) {
-
-        return jsonResponse({
-          success: false,
-          error: "pdfBase64 is required"
-        }, 400);
-
-      }
 
 
       // =======================================================
       // TEMPLATE
       // =======================================================
 
-      const templateName =
+      const selectedTemplate =
         String(template || "Reguler")
           .trim()
           .toLowerCase();
 
       const isPrekursor =
-        templateName === "prekursor";
+        selectedTemplate === "prekursor";
 
 
       // =======================================================
-      // HEADER VALUES
+      // SELECT HTML TEMPLATE
       // =======================================================
 
-      const values = {
-
-        Satu: Satu ?? "",
-        Dua: Dua ?? "",
-        Tiga: Tiga ?? "",
-        Empat: Empat ?? "",
-        Lima: Lima ?? "",
-        Enam: Enam ?? "",
-        Tujuh: Tujuh ?? "",
-        Delapan: Delapan ?? "",
-        Sembilan: Sembilan ?? "",
-        Sepuluh: Sepuluh ?? "",
-        Sebelas: Sebelas ?? "",
-        Duabelas: Duabelas ?? ""
-
-      };
-
-
-      // =======================================================
-      // PDF SOURCE
-      // =======================================================
-
-      const pdfBytes =
-        base64ToUint8Array(pdfBase64);
-
-
-      // =======================================================
-      // EXTRACT SOURCE PDF TABLE
-      // =======================================================
-
-      const sourceRows =
-        await extractProductRows(pdfBytes);
-
-
-      // =======================================================
-      // PREKURSOR LOOKUP
-      // =======================================================
-
-      let masterData = [];
-
-      if (isPrekursor) {
-
-        masterData =
-          await loadPrekursorMaster();
-
-      }
-
-
-      // =======================================================
-      // BUILD FINAL TABLE
-      // =======================================================
-
-      const tableRows = [];
-
-
-      for (const row of sourceRows) {
-
-        let zatAktif = "";
-        let bentuk = "";
-
-        if (isPrekursor) {
-
-          const lookup =
-            findPrekursor(
-              masterData,
-              row.productSKU
-            );
-
-          if (lookup) {
-
-            zatAktif =
-              lookup.zatAktif;
-
-            bentuk =
-              lookup.bentuk;
-
-          }
-
-        }
-
-
-        tableRows.push({
-
-          no:
-            row.no,
-
-          productSKU:
-            row.productSKU,
-
-          namaObat:
-            row.productDescription,
-
-          satuan:
-            row.kemasan,
-
-          jumlah:
-            row.qty,
-
-          keterangan:
-            row.invoiceNo,
-
-          zatAktif,
-
-          bentuk
-
-        });
-
-      }
-
-
-      // =======================================================
-      // LOAD HTML TEMPLATE
-      // =======================================================
-
-      const templateURL =
+      const templateUrl =
         isPrekursor
           ? PREKURSOR_HTML_URL
           : REGULER_HTML_URL;
 
 
-      const htmlResponse =
-        await fetch(templateURL);
+      // =======================================================
+      // GET HTML FROM GITHUB
+      // =======================================================
+
+      const templateResponse =
+        await fetch(templateUrl);
 
 
-      if (!htmlResponse.ok) {
+      if (!templateResponse.ok) {
 
         throw new Error(
-          `Template HTML gagal diambil: ${htmlResponse.status}`
+          `Template tidak ditemukan: ${templateUrl} (${templateResponse.status})`
         );
 
       }
 
 
       let html =
-        await htmlResponse.text();
+        await templateResponse.text();
 
 
       // =======================================================
-      // BUILD TABLE
+      // DATA
       // =======================================================
 
-      const tableHTML =
-        isPrekursor
-          ? buildPrekursorTable(tableRows)
-          : buildRegulerTable(tableRows);
+      const values = {
 
+        Satu:
+          cleanValue(Satu),
 
-      // =======================================================
-      // TTD + STEMPEL
-      // =======================================================
+        Dua:
+          cleanValue(Dua),
 
-      const signatureHTML =
-        buildSignatureHTML(
-          ttdBase64,
-          stempelBase64
-        );
+        Tiga:
+          cleanValue(Tiga),
 
+        Empat:
+          cleanValue(Empat),
 
-      // =======================================================
-      // REPLACE BASIC PLACEHOLDERS
-      // =======================================================
+        Lima:
+          cleanValue(Lima),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Satu",
-          values.Satu
-        );
+        Enam:
+          cleanValue(Enam),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Dua",
-          values.Dua
-        );
+        Tujuh:
+          cleanValue(Tujuh),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Tiga",
-          values.Tiga
-        );
+        Delapan:
+          cleanValue(Delapan),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Empat",
-          values.Empat
-        );
+        Sembilan:
+          cleanValue(Sembilan),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Lima",
-          values.Lima
-        );
+        Sepuluh:
+          cleanValue(Sepuluh),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Enam",
-          values.Enam
-        );
+        Sebelas:
+          cleanValue(Sebelas),
 
-      html =
-        replacePlaceholder(
-          html,
-          "Tujuh",
-          values.Tujuh
-        );
+        Duabelas:
+          cleanValue(Duabelas)
 
-      html =
-        replacePlaceholder(
-          html,
-          "Delapan",
-          values.Delapan
-        );
-
-      html =
-        replacePlaceholder(
-          html,
-          "Sembilan",
-          values.Sembilan
-        );
-
-      html =
-        replacePlaceholder(
-          html,
-          "Sepuluh",
-          values.Sepuluh
-        );
-
-      html =
-        replacePlaceholder(
-          html,
-          "Sebelas",
-          values.Sebelas
-        );
-
-      html =
-        replacePlaceholder(
-          html,
-          "Duabelas",
-          values.Duabelas
-        );
+      };
 
 
       // =======================================================
-      // TABLE + SIGNATURE
+      // PREKURSOR LOOKUP
+      // =======================================================
+
+      let prekursorLookup = [];
+
+
+      if (isPrekursor) {
+
+        const csvResponse =
+          await fetch(MASTER_PREKURSOR_URL);
+
+
+        if (!csvResponse.ok) {
+
+          throw new Error(
+            `master_prekursor.csv gagal diambil (${csvResponse.status})`
+          );
+
+        }
+
+
+        const csvText =
+          await csvResponse.text();
+
+
+        prekursorLookup =
+          parseCSV(csvText);
+
+
+        // -----------------------------------------------------
+        // LOOKUP BERDASARKAN SEMUA DATA YANG DIKIRIM
+        // -----------------------------------------------------
+
+        const lookupRows = [];
+
+
+        for (const key of Object.keys(values)) {
+
+          const value =
+            values[key];
+
+          if (!value) {
+            continue;
+          }
+
+
+          const found =
+            findProduct(
+              prekursorLookup,
+              value
+            );
+
+
+          if (found) {
+
+            lookupRows.push({
+              inputField: key,
+              product: found
+            });
+
+          }
+
+        }
+
+
+        // -----------------------------------------------------
+        // MASUKKAN HASIL LOOKUP KE HTML
+        // -----------------------------------------------------
+
+        if (lookupRows.length > 0) {
+
+          const first =
+            lookupRows[0].product;
+
+
+          html =
+            replaceAll(
+              html,
+              "{{ZAT_AKTIF}}",
+              first["Zat Aktif"] || ""
+            );
+
+
+          html =
+            replaceAll(
+              html,
+              "{{BENTUK}}",
+              first["Bentuk"] || ""
+            );
+
+        }
+
+      }
+
+
+      // =======================================================
+      // REPLACE PLACEHOLDERS
       // =======================================================
 
       html =
-        html.replaceAll(
-          "{{TablePDF}}",
-          tableHTML
+        replaceAll(
+          html,
+          "{{Satu}}",
+          escapeHtml(values.Satu)
         );
 
 
       html =
-        html.replaceAll(
-          "{{TTD&Stemp}}",
-          signatureHTML
+        replaceAll(
+          html,
+          "{{Dua}}",
+          escapeHtml(values.Dua)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Tiga}}",
+          escapeHtml(values.Tiga)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Empat}}",
+          escapeHtml(values.Empat)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Lima}}",
+          escapeHtml(values.Lima)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Enam}}",
+          escapeHtml(values.Enam)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Tujuh}}",
+          escapeHtml(values.Tujuh)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Delapan}}",
+          escapeHtml(values.Delapan)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Sembilan}}",
+          escapeHtml(values.Sembilan)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Sepuluh}}",
+          escapeHtml(values.Sepuluh)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Sebelas}}",
+          escapeHtml(values.Sebelas)
+        );
+
+
+      html =
+        replaceAll(
+          html,
+          "{{Duabelas}}",
+          escapeHtml(values.Duabelas)
         );
 
 
       // =======================================================
-      // FORCE A4
+      // TTD
       // =======================================================
 
-      html =
-        html.replace(
-          "</head>",
-          `
-          <style>
+      if (ttdBase64) {
 
-            @page {
-              size: A4 portrait;
-              margin: 0;
-            }
-
+        html =
+          insertImage(
             html,
-            body {
-              width: 210mm !important;
-              min-width: 210mm !important;
-              max-width: 210mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
+            "TTD",
+            ttdBase64
+          );
 
-            .a4-container {
-              width: 210mm !important;
-              height: 297mm !important;
-              min-height: 297mm !important;
-              max-height: 297mm !important;
-              overflow: hidden !important;
-              page-break-after: always;
-            }
+      }
 
-            table {
-              page-break-inside: auto;
-            }
 
-            tr {
-              page-break-inside: avoid;
-              page-break-after: auto;
-            }
+      // =======================================================
+      // STEMPEL
+      // =======================================================
 
-          </style>
-          </head>
-          `
+      if (stempelBase64) {
+
+        html =
+          insertImage(
+            html,
+            "STEMPEL",
+            stempelBase64
+          );
+
+      }
+
+
+      // =======================================================
+      // LAUNCH BROWSER
+      // =======================================================
+
+      if (!env.BROWSER) {
+
+        throw new Error(
+          "Binding BROWSER belum tersedia."
+        );
+
+      }
+
+
+      const browser =
+        await puppeteer.launch(
+          env.BROWSER
         );
 
 
-      // =======================================================
-      // RENDER HTML → PDF
-      // =======================================================
+      try {
 
-      const pdfResponse =
-        await env.BROWSER.quickAction(
-          "pdf",
+        const page =
+          await browser.newPage();
+
+
+        // =====================================================
+        // A4
+        // =====================================================
+
+        await page.setViewport({
+          width: 794,
+          height: 1123,
+          deviceScaleFactor: 1
+        });
+
+
+        // =====================================================
+        // LOAD HTML
+        // =====================================================
+
+        await page.setContent(
+          html,
           {
-            html,
+            waitUntil: "networkidle0"
+          }
+        );
 
-            waitForTimeout: 100,
 
-            printBackground: true,
+        // =====================================================
+        // PDF
+        // =====================================================
+
+        const pdfBytes =
+          await page.pdf({
 
             format: "A4",
+
+            printBackground: true,
 
             margin: {
               top: "0mm",
@@ -456,74 +467,59 @@ export default {
               bottom: "0mm",
               left: "0mm"
             }
-          }
-        );
+
+          });
 
 
-      if (!pdfResponse.ok) {
+        // =====================================================
+        // OPTIONAL PDF LIB LOAD
+        // Untuk memastikan hasil benar-benar PDF
+        // =====================================================
 
-        const errorText =
-          await pdfResponse.text();
+        const pdfDoc =
+          await PDFDocument.load(pdfBytes);
 
-        throw new Error(
-          `Browser PDF gagal: ${pdfResponse.status} ${errorText}`
-        );
+
+        const finalPdf =
+          await pdfDoc.save();
+
+
+        // =====================================================
+        // RETURN
+        // =====================================================
+
+        return jsonResponse({
+
+          success: true,
+
+          template:
+            isPrekursor
+              ? "Prekursor"
+              : "Reguler",
+
+          templateUrl,
+
+          pageCount:
+            pdfDoc.getPageCount(),
+
+          prekursorLookup:
+            prekursorLookup.length,
+
+          pdfBase64:
+            uint8ArrayToBase64(
+              finalPdf
+            )
+
+        });
+
+      } finally {
+
+        await browser.close();
 
       }
 
 
-      // =======================================================
-      // PDF RESULT
-      // =======================================================
-
-      const outputBytes =
-        new Uint8Array(
-          await pdfResponse.arrayBuffer()
-        );
-
-
-      const outputBase64 =
-        uint8ArrayToBase64(
-          outputBytes
-        );
-
-
-      // =======================================================
-      // RETURN
-      // =======================================================
-
-      return jsonResponse({
-
-        success: true,
-
-        template:
-          isPrekursor
-            ? "Prekursor"
-            : "Reguler",
-
-        sourceRows:
-          sourceRows.length,
-
-        outputRows:
-          tableRows.length,
-
-        prekursorLookup:
-          isPrekursor
-            ? tableRows.filter(
-                row =>
-                  row.zatAktif ||
-                  row.bentuk
-              ).length
-            : 0,
-
-        pdfBase64:
-          outputBase64
-
-      });
-
-    }
-
-    catch (error) {
+    } catch (error) {
 
       return jsonResponse({
 
@@ -542,531 +538,163 @@ export default {
     }
 
   }
-
 };
 
 
 // =============================================================
-// EXTRACT PRODUCT ROWS FROM SOURCE PDF
+// CLEAN VALUE
 // =============================================================
 
-async function extractProductRows(pdfBytes) {
+function cleanValue(value) {
 
-  const document =
-    await getDocument({
-
-      data: pdfBytes,
-
-      useSystemFonts: true
-
-    }).promise;
-
-
-  const allRows = [];
-
-
-  for (
-    let pageNumber = 1;
-    pageNumber <= document.numPages;
-    pageNumber++
+  if (
+    value === null ||
+    value === undefined
   ) {
 
-    const page =
-      await document.getPage(
-        pageNumber
-      );
-
-
-    const textContent =
-      await page.getTextContent();
-
-
-    const items =
-      textContent.items
-        .filter(
-          item =>
-            typeof item.str === "string" &&
-            item.str.trim() !== ""
-        )
-        .map(item => {
-
-          const transform =
-            item.transform || [];
-
-          return {
-
-            text:
-              item.str.trim(),
-
-            x:
-              Number(transform[4] || 0),
-
-            y:
-              Number(transform[5] || 0)
-
-          };
-
-        });
-
-
-    const lines =
-      groupTextIntoLines(items);
-
-
-    for (const line of lines) {
-
-      const row =
-        parseProductLine(line);
-
-
-      if (row) {
-
-        allRows.push(row);
-
-      }
-
-    }
+    return "";
 
   }
 
-
-  return allRows;
+  return String(value);
 
 }
 
 
 // =============================================================
-// GROUP PDF TEXT INTO VISUAL LINES
+// REPLACE ALL
 // =============================================================
 
-function groupTextIntoLines(items) {
-
-  const lines = [];
-
-
-  for (const item of items) {
-
-    let target = null;
-
-
-    for (const line of lines) {
-
-      if (
-        Math.abs(
-          line.y - item.y
-        ) <= 3
-      ) {
-
-        target = line;
-        break;
-
-      }
-
-    }
-
-
-    if (!target) {
-
-      target = {
-
-        y: item.y,
-
-        items: []
-
-      };
-
-      lines.push(target);
-
-    }
-
-
-    target.items.push(item);
-
-  }
-
-
-  lines.sort(
-    (a, b) =>
-      b.y - a.y
-  );
-
-
-  return lines.map(
-    line =>
-      line.items
-        .sort(
-          (a, b) =>
-            a.x - b.x
-        )
-        .map(
-          item =>
-            item.text
-        )
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim()
-  );
-
-}
-
-
-// =============================================================
-// PARSE PRODUCT LINE
-// =============================================================
-
-function parseProductLine(line) {
-
-  /*
-   * Expected source structure:
-   *
-   * No
-   * Product SKU
-   * Product Description
-   * Kemasan
-   * Case Pack
-   * Qty
-   * Shipping Batch Number
-   * Expired Date
-   * Invoice No
-   *
-   * Example:
-   *
-   * 1 3039929 A+ LUBRICATING AND REWETTING DROPS
-   * 10ML BOTOL 2 2 255...
-   */
-
-
-  const match =
-    line.match(
-      /^(\d+)\s+(\d{4,})\s+(.+?)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)$/i
-    );
-
-
-  if (!match) {
-    return null;
-  }
-
-
-  const no =
-    match[1];
-
-  const productSKU =
-    match[2];
-
-  const remainder =
-    match[3].trim();
-
-  const casePack =
-    match[4];
-
-  const qty =
-    match[5];
-
-  const shippingBatch =
-    match[6];
-
-  const expiredDate =
-    match[7];
-
-  const invoiceNo =
-    match[8];
-
-
-  /*
-   * Kemasan is normally the last token
-   * before Case Pack.
-   *
-   * Examples:
-   * BOTOL
-   * BOX
-   * TUBE
-   * KAPSUL
-   * TABLET
-   */
-
-
-  const kemasanMatch =
-    remainder.match(
-      /^(.*?)(?:\s+)(BOTOL|BOX|TUBE|TABLET|KAPSUL|KAPLET|SACHET|VIAL|AMPUL|STRIP|PCS|UNIT|ROLL|CAN|JAR|BAG|BOTTLE)$/i
-    );
-
-
-  let productDescription =
-    remainder;
-
-  let kemasan =
-    "";
-
-
-  if (kemasanMatch) {
-
-    productDescription =
-      kemasanMatch[1].trim();
-
-    kemasan =
-      kemasanMatch[2].trim();
-
-  }
-
-
-  return {
-
-    no,
-
-    productSKU,
-
-    productDescription,
-
-    kemasan,
-
-    casePack,
-
-    qty,
-
-    shippingBatch,
-
-    expiredDate,
-
-    invoiceNo
-
-  };
-
-}
-
-
-// =============================================================
-// REGULER TABLE
-// =============================================================
-
-function buildRegulerTable(rows) {
-
-  if (!rows.length) {
-
-    return `
-      <table>
-        <thead>
-          <tr>
-            <th>No</th>
-            <th>Nama Obat</th>
-            <th>Satuan</th>
-            <th>Jumlah</th>
-            <th>Keterangan</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colspan="5">
-              Tidak ada data obat.
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    `;
-
-  }
-
-
-  const body =
-    rows.map(row => {
-
-      return `
-        <tr>
-          <td>${escapeHTML(row.no)}</td>
-          <td>${escapeHTML(row.namaObat)}</td>
-          <td>${escapeHTML(row.satuan)}</td>
-          <td>${escapeHTML(row.jumlah)}</td>
-          <td>${escapeHTML(row.keterangan)}</td>
-        </tr>
-      `;
-
-    }).join("");
-
-
-  return `
-    <table>
-      <thead>
-        <tr>
-          <th>No</th>
-          <th>Nama Obat</th>
-          <th>Satuan</th>
-          <th>Jumlah</th>
-          <th>Keterangan</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        ${body}
-      </tbody>
-    </table>
-  `;
-
-}
-
-
-// =============================================================
-// PREKURSOR TABLE
-// =============================================================
-
-function buildPrekursorTable(rows) {
-
-  if (!rows.length) {
-
-    return `
-      <table>
-        <thead>
-          <tr>
-            <th>No</th>
-            <th>Nama Obat</th>
-            <th>Satuan</th>
-            <th>Zat Aktif</th>
-            <th>Bentuk</th>
-            <th>Jumlah</th>
-            <th>Keterangan</th>
-          </tr>
-        </thead>
-
-        <tbody>
-
-          <tr>
-            <td colspan="7">
-              Tidak ada data obat.
-            </td>
-          </tr>
-
-        </tbody>
-
-      </table>
-    `;
-
-  }
-
-
-  const body =
-    rows.map(row => {
-
-      return `
-        <tr>
-
-          <td>
-            ${escapeHTML(row.no)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.namaObat)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.satuan)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.zatAktif)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.bentuk)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.jumlah)}
-          </td>
-
-          <td>
-            ${escapeHTML(row.keterangan)}
-          </td>
-
-        </tr>
-      `;
-
-    }).join("");
-
-
-  return `
-    <table>
-
-      <thead>
-
-        <tr>
-
-          <th>No</th>
-
-          <th>Nama Obat</th>
-
-          <th>Satuan</th>
-
-          <th>Zat Aktif</th>
-
-          <th>Bentuk</th>
-
-          <th>Jumlah</th>
-
-          <th>Keterangan</th>
-
-        </tr>
-
-      </thead>
-
-      <tbody>
-
-        ${body}
-
-      </tbody>
-
-    </table>
-  `;
-
-}
-
-
-// =============================================================
-// LOAD PREKURSOR MASTER
-// =============================================================
-
-async function loadPrekursorMaster() {
-
-  const response =
-    await fetch(
-      MASTER_PREKURSOR_URL
-    );
-
-
-  if (!response.ok) {
-
-    throw new Error(
-      `master_prekursor.csv gagal diambil: ${response.status}`
-    );
-
-  }
-
-
-  const csv =
-    await response.text();
-
-
-  return parsePrekursorCSV(csv);
-
-}
-
-
-// =============================================================
-// FIND PREKURSOR
-// =============================================================
-
-function findPrekursor(
-  master,
-  sku
+function replaceAll(
+  text,
+  search,
+  replacement
 ) {
 
-  const target =
-    normalizeSKU(sku);
+  return text.split(search).join(
+    replacement
+  );
+
+}
 
 
-  return master.find(
-    row =>
-      normalizeSKU(
-        row.sku
-      ) === target
-  ) || null;
+// =============================================================
+// HTML ESCAPE
+// =============================================================
+
+function escapeHtml(value) {
+
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+}
+
+
+// =============================================================
+// INSERT IMAGE
+// =============================================================
+
+function insertImage(
+  html,
+  name,
+  base64
+) {
+
+  const image =
+    normalizeImageBase64(
+      base64
+    );
+
+
+  // -----------------------------------------------------------
+  // Placeholder {{TTD}}
+  // -----------------------------------------------------------
+
+  html =
+    replaceAll(
+      html,
+      `{{${name}}}`,
+      image
+    );
+
+
+  // -----------------------------------------------------------
+  // Placeholder {{TTD_IMAGE}}
+  // -----------------------------------------------------------
+
+  html =
+    replaceAll(
+      html,
+      `{{${name}_IMAGE}}`,
+      image
+    );
+
+
+  return html;
+
+}
+
+
+// =============================================================
+// NORMALIZE IMAGE
+// =============================================================
+
+function normalizeImageBase64(
+  base64
+) {
+
+  const value =
+    String(base64);
+
+
+  if (
+    value.startsWith(
+      "data:image/"
+    )
+  ) {
+
+    return value;
+
+  }
+
+
+  // PNG
+
+  if (
+    value.startsWith(
+      "iVBORw0KGgo"
+    )
+  ) {
+
+    return (
+      "data:image/png;base64," +
+      value
+    );
+
+  }
+
+
+  // JPEG
+
+  if (
+    value.startsWith(
+      "/9j/"
+    )
+  ) {
+
+    return (
+      "data:image/jpeg;base64," +
+      value
+    );
+
+  }
+
+
+  return value;
 
 }
 
@@ -1075,11 +703,10 @@ function findPrekursor(
 // PREKURSOR CSV
 // =============================================================
 
-function parsePrekursorCSV(csv) {
+function parseCSV(csv) {
 
   const lines =
     csv
-      .replace(/^\uFEFF/, "")
       .split(/\r?\n/)
       .filter(
         line =>
@@ -1087,43 +714,22 @@ function parsePrekursorCSV(csv) {
       );
 
 
-  if (lines.length < 2) {
+  if (
+    lines.length < 2
+  ) {
+
     return [];
+
   }
 
 
   const headers =
     parseCSVLine(
       lines[0]
-    ).map(
-      h =>
-        h.trim()
-          .toLowerCase()
     );
 
 
-  const skuIndex =
-    headers.findIndex(
-      h =>
-        h.includes("sku")
-    );
-
-
-  const zatAktifIndex =
-    headers.findIndex(
-      h =>
-        h.includes("zat aktif")
-    );
-
-
-  const bentukIndex =
-    headers.findIndex(
-      h =>
-        h.includes("bentuk")
-    );
-
-
-  const result = [];
+  const rows = [];
 
 
   for (
@@ -1138,23 +744,26 @@ function parsePrekursorCSV(csv) {
       );
 
 
-    result.push({
+    const row = {};
 
-      sku:
-        columns[skuIndex] ?? "",
 
-      zatAktif:
-        columns[zatAktifIndex] ?? "",
+    headers.forEach(
+      (header, index) => {
 
-      bentuk:
-        columns[bentukIndex] ?? ""
+        row[header] =
+          columns[index] ??
+          "";
 
-    });
+      }
+    );
+
+
+    rows.push(row);
 
   }
 
 
-  return result;
+  return rows;
 
 }
 
@@ -1183,7 +792,9 @@ function parseCSVLine(line) {
       line[i];
 
 
-    if (char === '"') {
+    if (
+      char === '"'
+    ) {
 
       if (
         insideQuotes &&
@@ -1201,9 +812,7 @@ function parseCSVLine(line) {
 
       }
 
-    }
-
-    else if (
+    } else if (
       char === "," &&
       !insideQuotes
     ) {
@@ -1214,9 +823,7 @@ function parseCSVLine(line) {
 
       current = "";
 
-    }
-
-    else {
+    } else {
 
       current += char;
 
@@ -1236,248 +843,94 @@ function parseCSVLine(line) {
 
 
 // =============================================================
-// TTD + STEMPEL HTML
+// PRODUCT LOOKUP
 // =============================================================
 
-function buildSignatureHTML(
-  ttdBase64,
-  stempelBase64
+function findProduct(
+  rows,
+  searchValue
 ) {
 
-  if (
-    !ttdBase64 &&
-    !stempelBase64
+  const search =
+    normalizeSearch(
+      searchValue
+    );
+
+
+  if (!search) {
+    return null;
+  }
+
+
+  const possibleFields = [
+
+    "Product SKU",
+
+    "SKU",
+
+    "product_sku",
+
+    "PRODUCT SKU",
+
+    "Kode",
+
+    "Code"
+
+  ];
+
+
+  for (
+    const row of rows
   ) {
 
-    return "";
+    for (
+      const field
+      of possibleFields
+    ) {
 
-  }
+      if (
+        row[field] ===
+        undefined
+      ) {
 
+        continue;
 
-  let ttd = "";
-
-  let stempel = "";
-
-
-  if (stempelBase64) {
-
-    stempel = `
-      <img
-        src="${normalizeImageData(stempelBase64)}"
-        style="
-          position:absolute;
-          left:0;
-          top:15px;
-          width:85px;
-          height:85px;
-          object-fit:contain;
-          z-index:1;
-        "
-      />
-    `;
-
-  }
+      }
 
 
-  if (ttdBase64) {
+      if (
+        normalizeSearch(
+          row[field]
+        ) === search
+      ) {
 
-    ttd = `
-      <img
-        src="${normalizeImageData(ttdBase64)}"
-        style="
-          position:absolute;
-          left:45px;
-          top:25px;
-          width:110px;
-          height:55px;
-          object-fit:contain;
-          z-index:2;
-        "
-      />
-    `;
+        return row;
 
-  }
-
-
-  return `
-    <div
-      style="
-        position:relative;
-        width:170px;
-        height:100px;
-        margin-top:-2cm;
-      "
-    >
-      ${stempel}
-      ${ttd}
-    </div>
-  `;
-
-}
-
-
-// =============================================================
-// IMAGE NORMALIZER
-// =============================================================
-
-function normalizeImageData(value) {
-
-  let clean =
-    String(value)
-      .trim();
-
-
-  if (
-    clean.startsWith(
-      "<img"
-    )
-  ) {
-
-    const match =
-      clean.match(
-        /src=["']([^"']+)["']/i
-      );
-
-
-    if (match) {
-
-      return match[1];
+      }
 
     }
 
   }
 
 
-  if (
-    clean.startsWith(
-      "data:image/"
-    )
-  ) {
-
-    return clean;
-
-  }
-
-
-  return `
-    data:image/png;base64,${clean}
-  `;
+  return null;
 
 }
 
 
 // =============================================================
-// PLACEHOLDER
+// NORMALIZE SEARCH
 // =============================================================
 
-function replacePlaceholder(
-  html,
-  name,
+function normalizeSearch(
   value
 ) {
-
-  return html.replaceAll(
-    `{{${name}}}`,
-    escapeHTML(
-      String(value ?? "")
-    )
-  );
-
-}
-
-
-// =============================================================
-// ESCAPE HTML
-// =============================================================
-
-function escapeHTML(value) {
-
-  return String(value ?? "")
-    .replace(
-      /&/g,
-      "&amp;"
-    )
-    .replace(
-      /</g,
-      "&lt;"
-    )
-    .replace(
-      />/g,
-      "&gt;"
-    )
-    .replace(
-      /"/g,
-      "&quot;"
-    )
-    .replace(
-      /'/g,
-      "&#039;"
-    );
-
-}
-
-
-// =============================================================
-// SKU NORMALIZER
-// =============================================================
-
-function normalizeSKU(value) {
 
   return String(
     value ?? ""
   )
-    .replace(
-      /\D/g,
-      ""
-    )
-    .trim();
-
-}
-
-
-// =============================================================
-// BASE64 → UINT8ARRAY
-// =============================================================
-
-function base64ToUint8Array(
-  base64
-) {
-
-  const clean =
-    String(base64)
-      .replace(
-        /^data:.*?;base64,/i,
-        ""
-      )
-      .replace(
-        /\s/g,
-        ""
-      );
-
-
-  const binary =
-    atob(clean);
-
-
-  const bytes =
-    new Uint8Array(
-      binary.length
-    );
-
-
-  for (
-    let i = 0;
-    i < binary.length;
-    i++
-  ) {
-
-    bytes[i] =
-      binary.charCodeAt(i);
-
-  }
-
-
-  return bytes;
+    .trim()
+    .toLowerCase();
 
 }
 
@@ -1516,7 +969,9 @@ function uint8ArrayToBase64(
   }
 
 
-  return btoa(binary);
+  return btoa(
+    binary
+  );
 
 }
 
@@ -1531,22 +986,21 @@ function jsonResponse(
 ) {
 
   return new Response(
+
     JSON.stringify(
       data
     ),
-    {
 
+    {
       status,
 
       headers: {
-
         "content-type":
           "application/json; charset=UTF-8"
-
       }
 
     }
+
   );
 
 }
-```
