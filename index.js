@@ -1,5 +1,13 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { getDocument } from "pdfjs-serverless";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb
+} from "pdf-lib";
+
+import {
+  getDocument
+} from "pdfjs-serverless";
+
 
 /* ============================================================
    GITHUB
@@ -29,106 +37,54 @@ export default {
     try {
 
       if (request.method !== "POST") {
-        return json({
-          success: false,
-          message: "Method harus POST."
-        }, 405);
+
+        return json(
+          {
+            success: false,
+            message: "Method harus POST."
+          },
+          405
+        );
       }
+
 
       const body =
         await request.json();
 
 
       /* ======================================================
-         INPUT
+         TEMPLATE
          ====================================================== */
 
       const template =
-        String(body.template || "")
-          .trim()
-          .toLowerCase();
+        String(
+          body.template || ""
+        )
+        .trim()
+        .toLowerCase();
 
 
       if (!template) {
+
         throw new Error(
           "template wajib dikirim."
         );
       }
 
 
-      const pdfBase64 =
-        body.pdfBase64 || "";
+      const isPrekursor =
+        template === "prekursor";
 
 
-      if (!pdfBase64) {
-        throw new Error(
-          "pdfBase64 wajib dikirim."
-        );
-      }
+      const isReguler =
+        template === "reguler" ||
+        template === "regular";
 
-
-      const ttdBase64 =
-        body.ttdBase64 || "";
-
-
-      const stempelBase64 =
-        body.stempelBase64 || "";
-
-
-      /* ======================================================
-         1. PDF UPLOAD DARI POWER AUTOMATE
-         
-         PDF INI BUKAN TEMPLATE OUTPUT.
-         
-         PDF INI DIGUNAKAN SEBAGAI:
-         - sumber Product SKU
-         - sumber data dokumen
-         ====================================================== */
-
-      const uploadedPDFBytes =
-        base64ToBytes(
-          pdfBase64
-        );
-
-
-      validatePDF(
-        uploadedPDFBytes,
-        "pdfBase64"
-      );
-
-
-      /* ======================================================
-         2. BACA TEXT PDF UPLOAD
-         ====================================================== */
-
-      const uploadedText =
-        await extractPDFText(
-          uploadedPDFBytes
-        );
-
-
-      /* ======================================================
-         3. PILIH TEMPLATE GITHUB
-         ====================================================== */
-
-      let templateURL;
 
       if (
-        template === "reguler" ||
-        template === "regular"
+        !isPrekursor &&
+        !isReguler
       ) {
-
-        templateURL =
-          REGULER_URL;
-
-      } else if (
-        template === "prekursor"
-      ) {
-
-        templateURL =
-          PREKURSOR_URL;
-
-      } else {
 
         throw new Error(
           `Template tidak dikenal: ${body.template}`
@@ -137,8 +93,61 @@ export default {
 
 
       /* ======================================================
-         4. DOWNLOAD TEMPLATE OUTPUT DARI GITHUB
+         PDF BASE64 DARI POWER AUTOMATE
+         
+         DIGUNAKAN SEBAGAI SUMBER DATA.
          ====================================================== */
+
+      const pdfBase64 =
+        body.pdfBase64 || "";
+
+
+      if (!pdfBase64) {
+
+        throw new Error(
+          "pdfBase64 wajib dikirim."
+        );
+      }
+
+
+      const sourcePdfBytes =
+        base64ToBytes(
+          pdfBase64
+        );
+
+
+      validatePDF(
+        sourcePdfBytes,
+        "pdfBase64"
+      );
+
+
+      /* ======================================================
+         BACA PDF SUMBER
+         
+         Khususnya diperlukan untuk Prekursor
+         untuk mencari Product SKU.
+         ====================================================== */
+
+      const sourceText =
+        await extractPDFText(
+          sourcePdfBytes
+        );
+
+
+      /* ======================================================
+         AMBIL TEMPLATE DARI GITHUB
+         ====================================================== */
+
+      let templateURL =
+        REGULER_URL;
+
+
+      if (isPrekursor) {
+        templateURL =
+          PREKURSOR_URL;
+      }
+
 
       const templateBytes =
         await downloadBytes(
@@ -148,12 +157,12 @@ export default {
 
       validatePDF(
         templateBytes,
-        "template GitHub"
+        "Template GitHub"
       );
 
 
       /* ======================================================
-         5. LOAD TEMPLATE
+         LOAD TEMPLATE
          ====================================================== */
 
       const pdf =
@@ -163,10 +172,10 @@ export default {
 
 
       /* ======================================================
-         6. DATA Satu - Duabelas
+         DATA Satu - Duabelas
          ====================================================== */
 
-      const data = {
+      const replacements = {
 
         Satu:
           clean(body.Satu),
@@ -207,25 +216,19 @@ export default {
 
 
       /* ======================================================
-         7. PREKURSOR LOOKUP
+         PREKURSOR LOOKUP
          ====================================================== */
 
-      let skuFound = "";
+      let productSKU = "";
       let zatAktif = "";
       let bentuk = "";
 
 
-      if (
-        template === "prekursor"
-      ) {
-
-        /*
-         * Cari Product SKU dari PDF upload.
-         */
+      if (isPrekursor) {
 
         const skuList =
           extractSKUsFromText(
-            uploadedText
+            sourceText
           );
 
 
@@ -239,9 +242,9 @@ export default {
         }
 
 
-        /*
-         * Download master CSV.
-         */
+        /* ----------------------------------------------------
+           MASTER CSV
+           ---------------------------------------------------- */
 
         const masterCSV =
           await downloadText(
@@ -249,15 +252,15 @@ export default {
           );
 
 
-        const master =
+        const masterRows =
           parseCSV(
             masterCSV
           );
 
 
-        /*
-         * Cari SKU yang cocok.
-         */
+        /* ----------------------------------------------------
+           LOOKUP SKU
+           ---------------------------------------------------- */
 
         let found = null;
 
@@ -268,14 +271,14 @@ export default {
 
           found =
             findSKU(
-              master,
+              masterRows,
               sku
             );
 
 
           if (found) {
 
-            skuFound =
+            productSKU =
               sku;
 
             break;
@@ -286,7 +289,7 @@ export default {
         if (!found) {
 
           throw new Error(
-            `Product SKU tidak ditemukan di master_prekursor.csv. SKU dari PDF: ${skuList.join(", ")}`
+            `Product SKU tidak ditemukan di master_prekursor.csv. SKU PDF: ${skuList.join(", ")}`
           );
         }
 
@@ -312,89 +315,71 @@ export default {
               "bentuk"
             ]
           );
-      }
 
 
-      /* ======================================================
-         8. REPLACE TEXT BIASA
-         
-         Placeholder:
-         Satu
-         Dua
-         ...
-         Duabelas
-         
-         + untuk Prekursor:
-         ZatAktif
-         Bentuk
-         ====================================================== */
+        /*
+         * Kalau template Prekursor mempunyai
+         * placeholder ZatAktif dan Bentuk,
+         * keduanya ikut diganti.
+         */
 
-      const replacementData = {
-
-        ...data
-
-      };
-
-
-      if (
-        template === "prekursor"
-      ) {
-
-        replacementData.ZatAktif =
+        replacements.ZatAktif =
           zatAktif;
 
-        replacementData.Bentuk =
+        replacements.Bentuk =
           bentuk;
       }
 
 
-      await replacePDFPlaceholders(
+      /* ======================================================
+         REPLACE TEXT BIASA
+         ====================================================== */
+
+      await replaceTemplateText(
         pdf,
         templateBytes,
-        replacementData
+        replacements
       );
 
 
       /* ======================================================
-         9. TTD + STEMPEL
+         TTD + STEMPEL
          ====================================================== */
 
-      await addTTDAndStamp(
+      await placeTTDAndStamp(
         pdf,
-        ttdBase64,
-        stempelBase64
+        templateBytes,
+        body.ttdBase64 || "",
+        body.stempelBase64 || ""
       );
 
 
       /* ======================================================
-         10. SAVE FINAL PDF
+         SAVE
          ====================================================== */
 
-      const output =
+      const outputBytes =
         await pdf.save();
 
 
       const outputBase64 =
         bytesToBase64(
-          output
+          outputBytes
         );
 
 
       /* ======================================================
-         11. RESPONSE
+         RESPONSE
          ====================================================== */
 
-      const fileName =
-        template === "prekursor"
-          ? "Prekursor.pdf"
-          : "Reguler.pdf";
-
-
-      return json({
+      const response = {
 
         success: true,
 
-        fileName,
+        fileName:
+          isPrekursor
+            ? "Prekursor.pdf"
+            : "Reguler.pdf",
 
         contentType:
           "application/pdf",
@@ -402,41 +387,47 @@ export default {
         pages:
           pdf.getPageCount(),
 
-        ...(template === "prekursor"
-          ? {
-              productSKU:
-                skuFound,
-
-              zatAktif,
-
-              bentuk
-            }
-          }
-          : {}),
-
         spBase64:
           outputBase64
-      });
+      };
+
+
+      if (isPrekursor) {
+
+        response.productSKU =
+          productSKU;
+
+        response.zatAktif =
+          zatAktif;
+
+        response.bentuk =
+          bentuk;
+      }
+
+
+      return json(
+        response
+      );
 
 
     } catch (error) {
 
-      return json({
-
-        success: false,
-
-        message:
-          error?.message ||
-          "Terjadi error pada Worker."
-
-      }, 500);
+      return json(
+        {
+          success: false,
+          message:
+            error?.message ||
+            "Terjadi error pada Worker."
+        },
+        500
+      );
     }
   }
 };
 
 
 /* ============================================================
-   EXTRACT TEXT FROM PDF
+   EXTRACT PDF TEXT
    ============================================================ */
 
 async function extractPDFText(
@@ -444,16 +435,17 @@ async function extractPDFText(
 ) {
 
   const loadingTask =
-    getDocument({
+    getDocument(
+      {
+        data:
+          new Uint8Array(
+            pdfBytes
+          ),
 
-      data:
-        new Uint8Array(
-          pdfBytes
-        ),
-
-      useSystemFonts:
-        true
-    });
+        useSystemFonts:
+          true
+      }
+    );
 
 
   const document =
@@ -482,10 +474,17 @@ async function extractPDFText(
     const text =
       content.items
         .map(
-          item =>
-            typeof item.str === "string"
-              ? item.str
-              : ""
+          item => {
+
+            if (
+              typeof item.str === "string"
+            ) {
+
+              return item.str;
+            }
+
+            return "";
+          }
         )
         .join(" ");
 
@@ -497,7 +496,9 @@ async function extractPDFText(
 
 
   try {
+
     await document.destroy();
+
   } catch (_) {}
 
 
@@ -508,34 +509,30 @@ async function extractPDFText(
 
 
 /* ============================================================
-   REPLACE TEXT PLACEHOLDERS
+   REPLACE TEMPLATE TEXT
    ============================================================ */
 
-async function replacePDFPlaceholders(
+async function replaceTemplateText(
   pdf,
-  originalBytes,
-  data
+  templateBytes,
+  replacements
 ) {
 
-  /*
-   * Baca template GitHub dengan PDF.js
-   * untuk mendapatkan posisi teks.
-   */
-
   const loadingTask =
-    getDocument({
+    getDocument(
+      {
+        data:
+          new Uint8Array(
+            templateBytes
+          ),
 
-      data:
-        new Uint8Array(
-          originalBytes
-        ),
-
-      useSystemFonts:
-        true
-    });
+        useSystemFonts:
+          true
+      }
+    );
 
 
-  const sourcePdf =
+  const sourceDocument =
     await loadingTask.promise;
 
 
@@ -551,12 +548,12 @@ async function replacePDFPlaceholders(
 
   for (
     let pageIndex = 0;
-    pageIndex < sourcePdf.numPages;
+    pageIndex < sourceDocument.numPages;
     pageIndex++
   ) {
 
     const sourcePage =
-      await sourcePdf.getPage(
+      await sourceDocument.getPage(
         pageIndex + 1
       );
 
@@ -579,27 +576,16 @@ async function replacePDFPlaceholders(
 
 
     for (
-      const [placeholder, rawValue]
-      of Object.entries(data)
+      const placeholder of Object.keys(
+        replacements
+      )
     ) {
 
-      if (
-        rawValue === undefined ||
-        rawValue === null
-      ) {
-        continue;
-      }
-
-
       const value =
-        String(
-          rawValue
-        );
+        replacements[
+          placeholder
+        ];
 
-
-      /*
-       * Cari placeholder.
-       */
 
       const matches =
         findTextMatches(
@@ -616,8 +602,17 @@ async function replacePDFPlaceholders(
           match.transform;
 
 
+        if (!transform) {
+          continue;
+        }
+
+
         const x =
           transform[4];
+
+
+        const yBase =
+          transform[5];
 
 
         const fontSize =
@@ -630,11 +625,11 @@ async function replacePDFPlaceholders(
 
 
         const y =
-          transform[5] -
+          yBase -
           fontSize;
 
 
-        const placeholderWidth =
+        const oldWidth =
           Math.max(
             match.width || 0,
             placeholder.length *
@@ -643,39 +638,46 @@ async function replacePDFPlaceholders(
           );
 
 
-        const height =
-          fontSize * 1.35;
+        const boxHeight =
+          fontSize *
+          1.5;
 
 
         /*
-         * Tutup teks placeholder.
+         * Tutup teks lama
          */
 
-        targetPage.drawRectangle({
+        targetPage.drawRectangle(
+          {
 
-          x:
-            x - 1,
+            x:
+              x - 1,
 
-          y:
-            y - 2,
+            y:
+              y - 2,
 
-          width:
-            placeholderWidth + 4,
+            width:
+              oldWidth + 5,
 
-          height:
-            height + 4,
+            height:
+              boxHeight + 4,
 
-          color:
-            rgb(1, 1, 1),
+            color:
+              rgb(
+                1,
+                1,
+                1
+              ),
 
-          borderWidth:
-            0
-        });
+            opacity:
+              1
+          }
+        );
 
 
         /*
-         * Kalau nilai kosong,
-         * placeholder cukup dihapus.
+         * Jika value kosong,
+         * placeholder dihapus saja.
          */
 
         if (
@@ -686,11 +688,11 @@ async function replacePDFPlaceholders(
 
 
         /*
-         * Tulis nilai baru.
+         * Tulis value baru
          */
 
         targetPage.drawText(
-          value,
+          String(value),
           {
 
             x,
@@ -703,16 +705,15 @@ async function replacePDFPlaceholders(
             font,
 
             color:
-              rgb(0, 0, 0),
-
-            maxWidth:
-              Math.max(
-                placeholderWidth + 100,
-                100
+              rgb(
+                0,
+                0,
+                0
               ),
 
             lineHeight:
-              fontSize * 1.2
+              fontSize *
+              1.2
           }
         );
       }
@@ -721,13 +722,15 @@ async function replacePDFPlaceholders(
 
 
   try {
-    await sourcePdf.destroy();
+
+    await sourceDocument.destroy();
+
   } catch (_) {}
 }
 
 
 /* ============================================================
-   FIND TEXT MATCHES
+   FIND TEXT
    ============================================================ */
 
 function findTextMatches(
@@ -735,14 +738,12 @@ function findTextMatches(
   target
 ) {
 
-  const result = [];
+  const matches = [];
 
 
   /*
-   * ==========================================================
-   * MODE 1
-   * Placeholder utuh dalam satu text item
-   * ==========================================================
+   * CASE 1
+   * Text berada dalam satu item.
    */
 
   for (
@@ -760,31 +761,29 @@ function findTextMatches(
       item.str.includes(target)
     ) {
 
-      result.push({
+      matches.push(
+        {
+          transform:
+            item.transform,
 
-        transform:
-          item.transform,
+          width:
+            item.width || 0,
 
-        width:
-          item.width || 0,
-
-        str:
-          item.str
-
-      });
+          str:
+            item.str
+        }
+      );
     }
   }
 
 
   /*
-   * ==========================================================
-   * MODE 2
-   * Placeholder terpecah
+   * CASE 2
+   * Text terpecah menjadi beberapa item.
    *
    * Contoh:
    *
-   * "Sa" + "tu"
-   * ==========================================================
+   * Sa + tu
    */
 
   for (
@@ -793,17 +792,20 @@ function findTextMatches(
     i++
   ) {
 
-    let combined = "";
+    let combined =
+      "";
 
-    let first = null;
+    let first =
+      null;
 
-    let last = null;
+    let last =
+      null;
 
 
     for (
       let j = i;
       j < Math.min(
-        i + 12,
+        i + 10,
         items.length
       );
       j++
@@ -837,21 +839,21 @@ function findTextMatches(
         combined.includes(target)
       ) {
 
-        result.push({
+        matches.push(
+          {
+            transform:
+              first.transform,
 
-          transform:
-            first.transform,
+            width:
+              calculateCombinedWidth(
+                first,
+                last
+              ),
 
-          width:
-            calculateCombinedWidth(
-              first,
-              last
-            ),
-
-          str:
-            combined
-
-        });
+            str:
+              combined
+          }
+        );
 
 
         break;
@@ -861,13 +863,13 @@ function findTextMatches(
 
 
   return removeDuplicateMatches(
-    result
+    matches
   );
 }
 
 
 /* ============================================================
-   REMOVE DUPLICATE MATCHES
+   REMOVE DUPLICATE
    ============================================================ */
 
 function removeDuplicateMatches(
@@ -881,14 +883,17 @@ function removeDuplicateMatches(
 
 
   for (
-    const match
-    of matches
+    const match of matches
   ) {
+
+    const transform =
+      match.transform || [];
+
 
     const key =
       [
-        match.transform?.[4],
-        match.transform?.[5],
+        transform[4],
+        transform[5],
         match.str
       ].join("|");
 
@@ -913,7 +918,7 @@ function removeDuplicateMatches(
 
 
 /* ============================================================
-   WIDTH
+   COMBINED WIDTH
    ============================================================ */
 
 function calculateCombinedWidth(
@@ -921,23 +926,36 @@ function calculateCombinedWidth(
   last
 ) {
 
-  const x1 =
-    first.transform[4];
+  if (
+    !first ||
+    !last
+  ) {
+
+    return 0;
+  }
 
 
-  const x2 =
-    last.transform[4];
+  const firstX =
+    first.transform?.[4] || 0;
+
+
+  const lastX =
+    last.transform?.[4] || 0;
 
 
   return Math.abs(
-    x2 - x1
+    lastX -
+    firstX
   ) +
-  (last.width || 0);
+  (
+    last.width ||
+    0
+  );
 }
 
 
 /* ============================================================
-   EXTRACT SKU FROM PDF TEXT
+   EXTRACT PRODUCT SKU
    ============================================================ */
 
 function extractSKUsFromText(
@@ -947,24 +965,18 @@ function extractSKUsFromText(
   const result = [];
 
 
-  /*
-   * Product SKU biasanya muncul
-   * sebagai angka 6-12 digit.
-   *
-   * Kita ambil angka yang terlihat
-   * di sekitar label Product SKU.
-   */
-
   const normalized =
-    text
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
+    String(
+      text || ""
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
 
 
-  const skuPatterns = [
+  const patterns = [
 
     /Product\s*SKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i,
 
@@ -976,8 +988,7 @@ function extractSKUsFromText(
 
 
   for (
-    const pattern
-    of skuPatterns
+    const pattern of patterns
   ) {
 
     const match =
@@ -998,16 +1009,13 @@ function extractSKUsFromText(
   }
 
 
-  /*
-   * Hilangkan duplicate.
-   */
-
   return [
     ...new Set(
       result
         .map(
-          x =>
-            String(x).trim()
+          value =>
+            String(value)
+              .trim()
         )
         .filter(Boolean)
     )
@@ -1016,7 +1024,7 @@ function extractSKUsFromText(
 
 
 /* ============================================================
-   SKU LOOKUP
+   FIND SKU
    ============================================================ */
 
 function findSKU(
@@ -1033,18 +1041,22 @@ function findSKU(
   return rows.find(
     row => {
 
-      const values = [
+      const candidates = [
 
         row["Product SKU"],
+
         row["ProductSKU"],
+
         row["SKU"],
+
         row["Sku"],
+
         row["sku"]
 
       ];
 
 
-      return values.some(
+      return candidates.some(
         value =>
           normalizeSKU(
             value
@@ -1072,45 +1084,438 @@ function normalizeSKU(
   }
 
 
-  return String(
-    value
-  )
-  .trim()
-  .replace(
-    /^0+/,
-    ""
-  )
-  .toUpperCase();
+  return String(value)
+    .trim()
+    .replace(
+      /^0+/,
+      ""
+    )
+    .toUpperCase();
 }
 
 
 /* ============================================================
-   CSV VALUE
+   TTD + STEMPEL
    ============================================================ */
 
-function firstValue(
-  object,
-  keys
+async function placeTTDAndStamp(
+  pdf,
+  templateBytes,
+  ttdInput,
+  stampInput
 ) {
 
-  for (
-    const key
-    of keys
+  if (
+    !ttdInput &&
+    !stampInput
   ) {
+    return;
+  }
+
+
+  const ttdBytes =
+    ttdInput
+      ? base64ToBytes(
+          extractImageBase64(
+            ttdInput
+          )
+        )
+      : null;
+
+
+  const stampBytes =
+    stampInput
+      ? base64ToBytes(
+          extractImageBase64(
+            stampInput
+          )
+        )
+      : null;
+
+
+  let ttdImage =
+    null;
+
+
+  let stampImage =
+    null;
+
+
+  if (ttdBytes) {
+
+    validateImage(
+      ttdBytes,
+      "ttdBase64"
+    );
+
 
     if (
-      object[key] !== undefined &&
-      object[key] !== null
+      isJPG(ttdBytes)
     ) {
 
-      return String(
-        object[key]
-      ).trim();
+      ttdImage =
+        await pdf.embedJpg(
+          ttdBytes
+        );
+
+    } else {
+
+      ttdImage =
+        await pdf.embedPng(
+          ttdBytes
+        );
     }
   }
 
 
-  return "";
+  if (stampBytes) {
+
+    validateImage(
+      stampBytes,
+      "stempelBase64"
+    );
+
+
+    if (
+      isJPG(stampBytes)
+    ) {
+
+      stampImage =
+        await pdf.embedJpg(
+          stampBytes
+        );
+
+    } else {
+
+      stampImage =
+        await pdf.embedPng(
+          stampBytes
+        );
+    }
+  }
+
+
+  /*
+   * Baca keyword TTD dan Stempel
+   * dari template GitHub.
+   */
+
+  const loadingTask =
+    getDocument(
+      {
+        data:
+          new Uint8Array(
+            templateBytes
+          ),
+
+        useSystemFonts:
+          true
+      }
+    );
+
+
+  const sourceDocument =
+    await loadingTask.promise;
+
+
+  const pages =
+    pdf.getPages();
+
+
+  for (
+    let pageIndex = 0;
+    pageIndex < sourceDocument.numPages;
+    pageIndex++
+  ) {
+
+    const sourcePage =
+      await sourceDocument.getPage(
+        pageIndex + 1
+      );
+
+
+    const content =
+      await sourcePage.getTextContent();
+
+
+    const items =
+      content.items || [];
+
+
+    const page =
+      pages[pageIndex];
+
+
+    if (!page) {
+      continue;
+    }
+
+
+    /*
+     * Cari TTD
+     */
+
+    const ttdMatches =
+      findTextMatches(
+        items,
+        "TTD"
+      );
+
+
+    /*
+     * Cari Stempel
+     */
+
+    const stampMatches =
+      findTextMatches(
+        items,
+        "Stempel"
+      );
+
+
+    /*
+     * TTD
+     */
+
+    if (
+      ttdImage &&
+      ttdMatches.length > 0
+    ) {
+
+      const match =
+        ttdMatches[0];
+
+
+      const x =
+        match.transform[4];
+
+
+      const y =
+        match.transform[5];
+
+
+      const width =
+        105;
+
+
+      const height =
+        55;
+
+
+      /*
+       * Tutup keyword TTD
+       */
+
+      page.drawRectangle(
+        {
+
+          x:
+            x - 2,
+
+          y:
+            y - 10,
+
+          width:
+            Math.max(
+              match.width || 25,
+              25
+            ) + 4,
+
+          height:
+            20,
+
+          color:
+            rgb(
+              1,
+              1,
+              1
+            )
+        }
+      );
+
+
+      /*
+       * TTD sedikit di atas
+       */
+
+      page.drawImage(
+        ttdImage,
+        {
+
+          x:
+            x - 20,
+
+          y:
+            y + 8,
+
+          width,
+
+          height
+        }
+      );
+    }
+
+
+    /*
+     * STEMPEL
+     */
+
+    if (
+      stampImage &&
+      stampMatches.length > 0
+    ) {
+
+      const match =
+        stampMatches[0];
+
+
+      const x =
+        match.transform[4];
+
+
+      const y =
+        match.transform[5];
+
+
+      const width =
+        85;
+
+
+      const height =
+        85;
+
+
+      /*
+       * Tutup keyword Stempel
+       */
+
+      page.drawRectangle(
+        {
+
+          x:
+            x - 2,
+
+          y:
+            y - 10,
+
+          width:
+            Math.max(
+              match.width || 50,
+              50
+            ) + 4,
+
+          height:
+            20,
+
+          color:
+            rgb(
+              1,
+              1,
+              1
+            )
+        }
+      );
+
+
+      /*
+       * Stempel sedikit di bawah TTD
+       */
+
+      page.drawImage(
+        stampImage,
+        {
+
+          x:
+            x - 5,
+
+          y:
+            y - 50,
+
+          width,
+
+          height,
+
+          opacity:
+            0.85
+        }
+      );
+    }
+  }
+
+
+  try {
+
+    await sourceDocument.destroy();
+
+  } catch (_) {}
+}
+
+
+/* ============================================================
+   EXTRACT IMAGE BASE64
+   ============================================================ */
+
+function extractImageBase64(
+  input
+) {
+
+  let value =
+    String(
+      input || ""
+    ).trim();
+
+
+  /*
+   * Format:
+   *
+   * <img src="data:image/png;base64,AAAA...">
+   */
+
+  const imgMatch =
+    value.match(
+      /<img[^>]+src=["']data:image\/(?:png|jpeg|jpg);base64,([^"']+)["']/i
+    );
+
+
+  if (
+    imgMatch &&
+    imgMatch[1]
+  ) {
+
+    return imgMatch[1];
+  }
+
+
+  /*
+   * Format data URI langsung.
+   */
+
+  if (
+    value.startsWith(
+      "data:"
+    )
+  ) {
+
+    const comma =
+      value.indexOf(",");
+
+
+    if (
+      comma !== -1
+    ) {
+
+      return value.substring(
+        comma + 1
+      );
+    }
+  }
+
+
+  return value
+    .replace(
+      /\s/g,
+      ""
+    );
 }
 
 
@@ -1122,15 +1527,18 @@ function parseCSV(
   text
 ) {
 
-  text =
-    text.replace(
+  const cleanText =
+    String(
+      text || ""
+    )
+    .replace(
       /^\uFEFF/,
       ""
     );
 
 
   const lines =
-    text
+    cleanText
       .split(/\r?\n/)
       .filter(
         line =>
@@ -1203,9 +1611,11 @@ function parseCSVLine(
 
   const result = [];
 
-  let current = "";
+  let current =
+    "";
 
-  let quoted = false;
+  let quoted =
+    false;
 
 
   for (
@@ -1227,7 +1637,8 @@ function parseCSVLine(
         line[i + 1] === '"'
       ) {
 
-        current += '"';
+        current +=
+          '"';
 
         i++;
 
@@ -1247,11 +1658,13 @@ function parseCSVLine(
         current.trim()
       );
 
-      current = "";
+      current =
+        "";
 
     } else {
 
-      current += char;
+      current +=
+        char;
     }
   }
 
@@ -1266,253 +1679,6 @@ function parseCSVLine(
 
 
 /* ============================================================
-   TTD + STEMPEL
-   ============================================================ */
-
-async function addTTDAndStamp(
-  pdf,
-  ttdBase64,
-  stempelBase64
-) {
-
-  if (
-    !ttdBase64 &&
-    !stempelBase64
-  ) {
-    return;
-  }
-
-
-  let ttd = null;
-
-  let stamp = null;
-
-
-  /* ----------------------------------------------------------
-     TTD
-     ---------------------------------------------------------- */
-
-  if (
-    ttdBase64
-  ) {
-
-    const bytes =
-      base64ToBytes(
-        ttdBase64
-      );
-
-
-    validateImage(
-      bytes,
-      "ttdBase64"
-    );
-
-
-    if (
-      isJPG(bytes)
-    ) {
-
-      ttd =
-        await pdf.embedJpg(
-          bytes
-        );
-
-    } else {
-
-      ttd =
-        await pdf.embedPng(
-          bytes
-        );
-    }
-  }
-
-
-  /* ----------------------------------------------------------
-     STEMPEL
-     ---------------------------------------------------------- */
-
-  if (
-    stempelBase64
-  ) {
-
-    const bytes =
-      base64ToBytes(
-        stempelBase64
-      );
-
-
-    validateImage(
-      bytes,
-      "stempelBase64"
-    );
-
-
-    if (
-      isJPG(bytes)
-    ) {
-
-      stamp =
-        await pdf.embedJpg(
-          bytes
-        );
-
-    } else {
-
-      stamp =
-        await pdf.embedPng(
-          bytes
-        );
-    }
-  }
-
-
-  /* ----------------------------------------------------------
-     DRAW
-     ---------------------------------------------------------- */
-
-  const pages =
-    pdf.getPages();
-
-
-  for (
-    const page
-    of pages
-  ) {
-
-    const {
-      width
-    } =
-      page.getSize();
-
-
-    /*
-     * STEMPEL
-     */
-
-    if (stamp) {
-
-      page.drawImage(
-        stamp,
-        {
-
-          x:
-            width - 130,
-
-          y:
-            45,
-
-          width:
-            90,
-
-          height:
-            90,
-
-          opacity:
-            0.85
-        }
-      );
-    }
-
-
-    /*
-     * TTD
-     */
-
-    if (ttd) {
-
-      page.drawImage(
-        ttd,
-        {
-
-          x:
-            width - 120,
-
-          y:
-            55,
-
-          width:
-            105,
-
-          height:
-            55
-        }
-      );
-    }
-  }
-}
-
-
-/* ============================================================
-   DOWNLOAD BINARY
-   ============================================================ */
-
-async function downloadBytes(
-  url
-) {
-
-  const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "User-Agent":
-            "Guardian-PDF-Worker"
-        }
-      }
-    );
-
-
-  if (
-    !response.ok
-  ) {
-
-    throw new Error(
-      `Gagal mengambil file: ${url} (${response.status})`
-    );
-  }
-
-
-  return new Uint8Array(
-    await response.arrayBuffer()
-  );
-}
-
-
-/* ============================================================
-   DOWNLOAD TEXT
-   ============================================================ */
-
-async function downloadText(
-  url
-) {
-
-  const response =
-    await fetch(
-      url,
-      {
-        headers: {
-          "User-Agent":
-            "Guardian-PDF-Worker"
-        }
-      }
-    );
-
-
-  if (
-    !response.ok
-  ) {
-
-    throw new Error(
-      `Gagal mengambil CSV: ${response.status}`
-    );
-  }
-
-
-  return await response.text();
-}
-
-
-/* ============================================================
    BASE64 → BYTES
    ============================================================ */
 
@@ -1523,19 +1689,14 @@ function base64ToBytes(
   let text =
     String(
       value || ""
-    ).trim();
+    )
+    .trim();
 
-
-  /*
-   * Support:
-   *
-   * data:application/pdf;base64,...
-   * data:image/png;base64,...
-   * data:image/jpeg;base64,...
-   */
 
   if (
-    text.startsWith("data:")
+    text.startsWith(
+      "data:"
+    )
   ) {
 
     const comma =
@@ -1561,9 +1722,7 @@ function base64ToBytes(
     );
 
 
-  if (
-    !text
-  ) {
+  if (!text) {
 
     throw new Error(
       "Base64 kosong."
@@ -1618,7 +1777,8 @@ function bytesToBase64(
   bytes
 ) {
 
-  let binary = "";
+  let binary =
+    "";
 
   const chunkSize =
     0x8000;
@@ -1646,6 +1806,76 @@ function bytesToBase64(
   return btoa(
     binary
   );
+}
+
+
+/* ============================================================
+   DOWNLOAD BINARY
+   ============================================================ */
+
+async function downloadBytes(
+  url
+) {
+
+  const response =
+    await fetch(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Guardian-PDF-Worker"
+        }
+      }
+    );
+
+
+  if (
+    !response.ok
+  ) {
+
+    throw new Error(
+      `Gagal mengambil template: HTTP ${response.status}`
+    );
+  }
+
+
+  return new Uint8Array(
+    await response.arrayBuffer()
+  );
+}
+
+
+/* ============================================================
+   DOWNLOAD TEXT
+   ============================================================ */
+
+async function downloadText(
+  url
+) {
+
+  const response =
+    await fetch(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Guardian-PDF-Worker"
+        }
+      }
+    );
+
+
+  if (
+    !response.ok
+  ) {
+
+    throw new Error(
+      `Gagal mengambil master CSV: HTTP ${response.status}`
+    );
+  }
+
+
+  return await response.text();
 }
 
 
@@ -1691,24 +1921,7 @@ function validatePDF(
 
 
 /* ============================================================
-   IMAGE TYPE
-   ============================================================ */
-
-function isJPG(
-  bytes
-) {
-
-  return (
-    bytes.length >= 3 &&
-    bytes[0] === 0xFF &&
-    bytes[1] === 0xD8 &&
-    bytes[2] === 0xFF
-  );
-}
-
-
-/* ============================================================
-   VALIDATE IMAGE
+   IMAGE VALIDATION
    ============================================================ */
 
 function validateImage(
@@ -1729,7 +1942,9 @@ function validateImage(
 
 
   const jpg =
-    isJPG(bytes);
+    isJPG(
+      bytes
+    );
 
 
   if (
@@ -1741,6 +1956,52 @@ function validateImage(
       `${name} bukan PNG/JPG yang valid.`
     );
   }
+}
+
+
+/* ============================================================
+   JPG
+   ============================================================ */
+
+function isJPG(
+  bytes
+) {
+
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xFF &&
+    bytes[1] === 0xD8 &&
+    bytes[2] === 0xFF
+  );
+}
+
+
+/* ============================================================
+   FIRST VALUE
+   ============================================================ */
+
+function firstValue(
+  object,
+  keys
+) {
+
+  for (
+    const key of keys
+  ) {
+
+    if (
+      object[key] !== undefined &&
+      object[key] !== null
+    ) {
+
+      return String(
+        object[key]
+      ).trim();
+    }
+  }
+
+
+  return "";
 }
 
 
@@ -1768,7 +2029,7 @@ function clean(
 
 
 /* ============================================================
-   JSON RESPONSE
+   JSON
    ============================================================ */
 
 function json(
@@ -1783,7 +2044,6 @@ function json(
       2
     ),
     {
-
       status,
 
       headers: {
