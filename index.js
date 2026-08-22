@@ -1,13 +1,8 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { getDocument } from "pdfjs-serverless";
 
-const GITHUB_BASE =
-  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
-
-const REGULER_URL =
-  `${GITHUB_BASE}/Reguler.pdf`;
-
-const PREKURSOR_URL =
-  `${GITHUB_BASE}/Prekursor.pdf`;
+const TEMPLATE_URL =
+  "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.pdf";
 
 const PLACEHOLDERS = [
   "Satu",
@@ -28,10 +23,10 @@ export default {
   async fetch(request) {
     try {
       if (request.method !== "POST") {
-        return json(
+        return response(
           {
             success: false,
-            message: "Method harus POST."
+            message: "Gunakan method POST."
           },
           405
         );
@@ -39,69 +34,81 @@ export default {
 
       const body = await request.json();
 
-      const templateName =
-        String(body.template || "Reguler")
+      /*
+       * =====================================================
+       * 1. VALIDASI TEMPLATE
+       * =====================================================
+       */
+
+      const template =
+        String(body.template || "")
           .trim()
           .toLowerCase();
 
-      if (
-        templateName !== "reguler" &&
-        templateName !== "regular" &&
-        templateName !== "prekursor"
-      ) {
-        throw new Error(
-          `Template tidak dikenal: ${body.template}`
+      if (template !== "reguler") {
+        return response(
+          {
+            success: false,
+            message:
+              "Versi ini khusus template Reguler."
+          },
+          400
         );
       }
 
       /*
-       * ==========================================
-       * 1. AMBIL TEMPLATE DARI GITHUB
-       * ==========================================
+       * =====================================================
+       * 2. PDF UPLOAD
+       *
+       * HANYA digunakan untuk menentukan jumlah halaman.
+       * PDF upload TIDAK menjadi output.
+       * =====================================================
        */
 
-      const templateUrl =
-        templateName === "prekursor"
-          ? PREKURSOR_URL
-          : REGULER_URL;
+      if (!body.pdfBase64) {
+        throw new Error(
+          "pdfBase64 wajib dikirim."
+        );
+      }
+
+      const uploadBytes =
+        base64ToBytes(
+          body.pdfBase64
+        );
+
+      validatePdf(
+        uploadBytes,
+        "PDF upload"
+      );
+
+      const uploadPdf =
+        await PDFDocument.load(
+          uploadBytes
+        );
+
+      const uploadPages =
+        uploadPdf.getPageCount();
+
+      /*
+       * =====================================================
+       * 3. DOWNLOAD TEMPLATE REGULER
+       * =====================================================
+       */
 
       const templateBytes =
-        await downloadBytes(templateUrl);
+        await downloadBytes(
+          TEMPLATE_URL
+        );
 
       validatePdf(
         templateBytes,
-        "Template"
+        "Reguler.pdf"
       );
 
       /*
-       * ==========================================
-       * 2. BACA PDF UPLOAD
-       *
-       * HANYA UNTUK JUMLAH HALAMAN
-       * ==========================================
-       */
-
-      let uploadPageCount = 1;
-
-      if (body.pdfBase64) {
-        const uploadedBytes =
-          base64ToBytes(body.pdfBase64);
-
-        validatePdf(
-          uploadedBytes,
-          "pdfBase64"
-        );
-
-        uploadPageCount =
-          await getPageCount(
-            uploadedBytes
-          );
-      }
-
-      /*
-       * ==========================================
-       * 3. LOAD TEMPLATE
-       * ==========================================
+       * =====================================================
+       * 4. LOAD TEMPLATE
+       * =====================================================
        */
 
       const templatePdf =
@@ -109,30 +116,68 @@ export default {
           templateBytes
         );
 
-      const templatePageCount =
+      const templatePages =
         templatePdf.getPageCount();
 
-      if (templatePageCount < 1) {
+      if (templatePages === 0) {
         throw new Error(
-          "Template PDF tidak memiliki halaman."
+          "Reguler.pdf tidak mempunyai halaman."
         );
       }
 
       /*
-       * ==========================================
-       * 4. BUAT OUTPUT
+       * =====================================================
+       * 5. BUAT OUTPUT
        *
        * JUMLAH HALAMAN = PDF UPLOAD
-       * ==========================================
+       * =====================================================
        */
 
       const outputPdf =
         await PDFDocument.create();
 
       /*
-       * ==========================================
-       * 5. FONT
-       * ==========================================
+       * =====================================================
+       * 6. COPY TEMPLATE
+       * =====================================================
+       */
+
+      for (
+        let i = 0;
+        i < uploadPages;
+        i++
+      ) {
+        const sourceIndex =
+          i % templatePages;
+
+        const [page] =
+          await outputPdf.copyPages(
+            templatePdf,
+            [sourceIndex]
+          );
+
+        outputPdf.addPage(page);
+      }
+
+      /*
+       * =====================================================
+       * 7. AMBIL POSISI PLACEHOLDER
+       * DARI TEMPLATE REGULER
+       *
+       * Kita baca template ORIGINAL,
+       * bukan PDF upload.
+       * =====================================================
+       */
+
+      const positions =
+        await findPlaceholderPositions(
+          templateBytes
+        );
+
+      /*
+       * =====================================================
+       * 8. REPLACE Satu - Duabelas
+       * =====================================================
        */
 
       const font =
@@ -140,51 +185,17 @@ export default {
           StandardFonts.Helvetica
         );
 
-      /*
-       * ==========================================
-       * 6. BUAT HALAMAN SESUAI PDF UPLOAD
-       * ==========================================
-       */
-
-      for (
-        let i = 0;
-        i < uploadPageCount;
-        i++
-      ) {
-        const sourceIndex =
-          i % templatePageCount;
-
-        const [copiedPage] =
-          await outputPdf.copyPages(
-            templatePdf,
-            [sourceIndex]
-          );
-
-        outputPdf.addPage(
-          copiedPage
-        );
-      }
-
-      /*
-       * ==========================================
-       * 7. REPLACE Satu - Duabelas
-       *
-       * PENTING:
-       * Kita gunakan text extraction sederhana
-       * untuk mencari posisi.
-       * ==========================================
-       */
-
-      await replaceTextInOutput(
+      replaceValues(
         outputPdf,
+        positions,
         body,
         font
       );
 
       /*
-       * ==========================================
-       * 8. SAVE
-       * ==========================================
+       * =====================================================
+       * 9. SAVE
+       * =====================================================
        */
 
       const outputBytes =
@@ -196,34 +207,35 @@ export default {
         );
 
       /*
-       * ==========================================
-       * 9. RESPONSE
-       * ==========================================
+       * =====================================================
+       * 10. RESPONSE
+       * =====================================================
        */
 
-      return json({
+      return response({
         success: true,
 
         message:
-          "PDF berhasil diproses.",
+          "PDF Reguler berhasil diproses.",
 
         template:
-          templateName === "prekursor"
-            ? "Prekursor"
-            : "Reguler",
+          "Reguler",
 
         pages:
           outputPdf.getPageCount(),
 
         sourcePages:
-          uploadPageCount,
+          uploadPages,
+
+        placeholdersFound:
+          Object.keys(positions),
 
         spBase64:
           outputBase64
       });
 
     } catch (error) {
-      return json(
+      return response(
         {
           success: false,
           message:
@@ -238,95 +250,412 @@ export default {
 
 
 /*
- * ==================================================
- * REPLACE TEXT
- * ==================================================
- *
- * CATATAN:
- * Untuk tahap pertama kita menggunakan
- * koordinat standar yang ditemukan dari
- * content stream PDF.
- *
- * Tahap ini sengaja sederhana supaya Worker
- * cepat dan stabil.
+ * =========================================================
+ * CARI POSISI PLACEHOLDER
+ * =========================================================
  */
 
-async function replaceTextInOutput(
+async function findPlaceholderPositions(
+  pdfBytes
+) {
+  const pdfjs =
+    await getDocument({
+      data:
+        new Uint8Array(
+          pdfBytes
+        ),
+      useSystemFonts: true
+    }).promise;
+
+  const result = {};
+
+  for (
+    let pageNumber = 1;
+    pageNumber <= pdfjs.numPages;
+    pageNumber++
+  ) {
+    const page =
+      await pdfjs.getPage(
+        pageNumber
+      );
+
+    const content =
+      await page.getTextContent();
+
+    const items =
+      content.items || [];
+
+    for (
+      const placeholder of PLACEHOLDERS
+    ) {
+      /*
+       * Jangan ambil posisi yang sama
+       * berkali-kali pada halaman yang sama.
+       */
+
+      if (
+        !result[placeholder]
+      ) {
+        result[placeholder] = [];
+      }
+
+      /*
+       * CASE 1:
+       * placeholder berada dalam satu text item
+       */
+
+      for (
+        let i = 0;
+        i < items.length;
+        i++
+      ) {
+        const item =
+          items[i];
+
+        if (
+          typeof item.str !== "string"
+        ) {
+          continue;
+        }
+
+        if (
+          item.str.includes(
+            placeholder
+          )
+        ) {
+          result[placeholder].push({
+            page:
+              pageNumber - 1,
+
+            x:
+              item.transform[4],
+
+            y:
+              item.transform[5],
+
+            width:
+              item.width || 0,
+
+            fontSize:
+              Math.abs(
+                item.transform[3] || 10
+              ),
+
+            text:
+              item.str
+          });
+
+          break;
+        }
+      }
+
+      /*
+       * CASE 2:
+       * placeholder terpecah menjadi beberapa
+       * text item.
+       *
+       * Contoh:
+       *
+       * "Sa" + "tu"
+       *
+       * atau:
+       *
+       * "Dua" + "belas"
+       */
+
+      if (
+        result[placeholder].length === 0
+      ) {
+        for (
+          let start = 0;
+          start < items.length;
+          start++
+        ) {
+          let combined = "";
+
+          let first = null;
+          let last = null;
+
+          for (
+            let j = start;
+            j < Math.min(
+              start + 10,
+              items.length
+            );
+            j++
+          ) {
+            const item =
+              items[j];
+
+            if (
+              typeof item.str !==
+              "string"
+            ) {
+              continue;
+            }
+
+            if (!first) {
+              first = item;
+            }
+
+            combined +=
+              item.str;
+
+            last = item;
+
+            if (
+              combined.includes(
+                placeholder
+              )
+            ) {
+              result[
+                placeholder
+              ].push({
+                page:
+                  pageNumber - 1,
+
+                x:
+                  first.transform[4],
+
+                y:
+                  first.transform[5],
+
+                width:
+                  getCombinedWidth(
+                    first,
+                    last
+                  ),
+
+                fontSize:
+                  Math.abs(
+                    first.transform[3] ||
+                    10
+                  ),
+
+                text:
+                  combined
+              });
+
+              break;
+            }
+          }
+
+          if (
+            result[placeholder].length >
+            0
+          ) {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  try {
+    await pdfjs.destroy();
+  } catch (_) {}
+
+  return result;
+}
+
+
+/*
+ * =========================================================
+ * REPLACE VALUE
+ * =========================================================
+ */
+
+function replaceValues(
   pdf,
+  positions,
   body,
   font
 ) {
   const pages =
     pdf.getPages();
 
-  /*
-   * Karena pdf-lib tidak menyediakan text
-   * extraction native, kita lakukan pendekatan
-   * berdasarkan placeholder yang sudah diketahui.
-   *
-   * Untuk tahap pertama kita hanya melakukan
-   * overlay jika koordinat sudah kita tentukan
-   * dari template.
-   *
-   * Jangan menggambar TEST SATU di semua halaman.
-   */
+  for (
+    const placeholder of PLACEHOLDERS
+  ) {
+    const locations =
+      positions[placeholder] || [];
 
-  const values = {};
+    let value =
+      body[placeholder];
 
-  for (const key of PLACEHOLDERS) {
-    values[key] =
-      body[key] === undefined ||
-      body[key] === null
-        ? ""
-        : String(body[key]);
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      value = "";
+    }
+
+    value =
+      String(value);
+
+    /*
+     * Kalau kosong, placeholder tetap
+     * akan dihapus.
+     */
+
+    for (
+      const location of locations
+    ) {
+      const page =
+        pages[location.page];
+
+      if (!page) {
+        continue;
+      }
+
+      const x =
+        location.x;
+
+      const y =
+        location.y;
+
+      const fontSize =
+        Math.max(
+          6,
+          location.fontSize
+        );
+
+      const oldWidth =
+        Math.max(
+          location.width,
+          placeholder.length *
+            fontSize *
+            0.5
+        );
+
+      /*
+       * HAPUS PLACEHOLDER
+       */
+
+      page.drawRectangle({
+        x:
+          x - 2,
+
+        y:
+          y - fontSize - 3,
+
+        width:
+          oldWidth + 6,
+
+        height:
+          fontSize + 7,
+
+        color:
+          rgb(
+            1,
+            1,
+            1
+          )
+      });
+
+      /*
+       * JIKA VALUE KOSONG,
+       * SELESAI.
+       */
+
+      if (
+        value.trim() === ""
+      ) {
+        continue;
+      }
+
+      /*
+       * TULIS VALUE
+       *
+       * Posisi awal mengikuti posisi
+       * placeholder asli.
+       */
+
+      page.drawText(
+        value,
+        {
+          x:
+            x,
+
+          y:
+            y - 1,
+
+          size:
+            fontSize,
+
+          font,
+
+          color:
+            rgb(
+              0,
+              0,
+              0
+            ),
+
+          lineHeight:
+            fontSize * 1.15
+        }
+      );
+    }
+  }
+}
+
+
+/*
+ * =========================================================
+ * COMBINED WIDTH
+ * =========================================================
+ */
+
+function getCombinedWidth(
+  first,
+  last
+) {
+  if (
+    !first ||
+    !last
+  ) {
+    return 0;
   }
 
-  /*
-   * Untuk sementara jangan menggambar apa pun
-   * secara acak.
-   *
-   * Ini sengaja dikosongkan sampai posisi
-   * placeholder template kita pastikan.
-   */
+  const x1 =
+    first.transform?.[4] || 0;
 
-  /*
-   * Fungsi ini dipertahankan sebagai tempat
-   * untuk koordinat final template.
-   */
+  const x2 =
+    last.transform?.[4] || 0;
 
-  return;
+  return (
+    Math.abs(
+      x2 - x1
+    ) +
+    (last.width || 0)
+  );
 }
 
 
 /*
- * ==================================================
- * GET PAGE COUNT
- * ==================================================
- */
-
-async function getPageCount(bytes) {
-  const pdf =
-    await PDFDocument.load(
-      bytes
-    );
-
-  return pdf.getPageCount();
-}
-
-
-/*
- * ==================================================
+ * =========================================================
  * DOWNLOAD
- * ==================================================
+ * =========================================================
  */
 
-async function downloadBytes(url) {
+async function downloadBytes(
+  url
+) {
   const response =
-    await fetch(url);
+    await fetch(
+      url,
+      {
+        headers: {
+          "User-Agent":
+            "Guardian-PDF-Worker"
+        }
+      }
+    );
 
   if (!response.ok) {
     throw new Error(
-      `Gagal mengambil template GitHub. HTTP ${response.status}`
+      `Gagal mengambil Reguler.pdf dari GitHub. HTTP ${response.status}`
     );
   }
 
@@ -337,25 +666,32 @@ async function downloadBytes(url) {
 
 
 /*
- * ==================================================
+ * =========================================================
  * BASE64 -> BYTES
- * ==================================================
+ * =========================================================
  */
 
-function base64ToBytes(input) {
+function base64ToBytes(
+  input
+) {
   let value =
-    String(input || "").trim();
+    String(
+      input || ""
+    ).trim();
 
   /*
-   * Data URI
+   * DATA URI
    */
+
   if (
     value.startsWith("data:")
   ) {
     const comma =
       value.indexOf(",");
 
-    if (comma !== -1) {
+    if (
+      comma !== -1
+    ) {
       value =
         value.substring(
           comma + 1
@@ -366,6 +702,7 @@ function base64ToBytes(input) {
   /*
    * HTML IMG
    */
+
   const imgMatch =
     value.match(
       /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
@@ -396,7 +733,7 @@ function base64ToBytes(input) {
   try {
     binary =
       atob(value);
-  } catch (error) {
+  } catch (_) {
     throw new Error(
       "Base64 tidak valid."
     );
@@ -421,12 +758,14 @@ function base64ToBytes(input) {
 
 
 /*
- * ==================================================
+ * =========================================================
  * BYTES -> BASE64
- * ==================================================
+ * =========================================================
  */
 
-function bytesToBase64(bytes) {
+function bytesToBase64(
+  bytes
+) {
   let binary = "";
 
   const chunkSize =
@@ -449,14 +788,16 @@ function bytesToBase64(bytes) {
       );
   }
 
-  return btoa(binary);
+  return btoa(
+    binary
+  );
 }
 
 
 /*
- * ==================================================
+ * =========================================================
  * VALIDATE PDF
- * ==================================================
+ * =========================================================
  */
 
 function validatePdf(
@@ -474,7 +815,10 @@ function validatePdf(
 
   const header =
     new TextDecoder().decode(
-      bytes.slice(0, 5)
+      bytes.slice(
+        0,
+        5
+      )
     );
 
   if (
@@ -488,12 +832,12 @@ function validatePdf(
 
 
 /*
- * ==================================================
- * JSON RESPONSE
- * ==================================================
+ * =========================================================
+ * RESPONSE
+ * =========================================================
  */
 
-function json(
+function response(
   data,
   status = 200
 ) {
