@@ -6,6 +6,10 @@ import {
 
 import { getDocument } from "pdfjs-serverless";
 
+/* =========================================================
+   GITHUB
+   ========================================================= */
+
 const GITHUB_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
@@ -17,6 +21,11 @@ const PREKURSOR_URL =
 
 const MASTER_URL =
   `${GITHUB_BASE}/master_prekursor.csv`;
+
+
+/* =========================================================
+   PLACEHOLDER
+   ========================================================= */
 
 const PLACEHOLDERS = [
   "Satu",
@@ -33,54 +42,16 @@ const PLACEHOLDERS = [
   "Duabelas"
 ];
 
-/*
- * Placeholder jumlah lembar.
- *
- * Worker akan mencoba mencari salah satu keyword
- * ini pada template.
- */
-const PAGE_PLACEHOLDERS = [
-  "Jumlah Lembar",
-  "jumlah lembar",
-  "Jumlah lembar",
-  "Lembar",
-  "lembar"
-];
-
-/*
- * Header yang mungkin ditemukan pada tabel
- * template.
- */
-const TABLE_HEADER_HINTS = [
-  "Nama Obat",
-  "Product SKU",
-  "Nama",
-  "No",
-  "Satuan"
-];
-
-/*
- * Header tabel PDF upload.
- */
-const UPLOAD_HEADERS = [
-  "No",
-  "Product SKU",
-  "Product Description",
-  "Kemasan",
-  "Case Pack Qty",
-  "Shipping Batch Number",
-  "Expired Date",
-  "Invoice No"
-];
-
 
 /* =========================================================
- * MAIN WORKER
- * ========================================================= */
+   MAIN
+   ========================================================= */
 
 export default {
   async fetch(request) {
+
     try {
+
       if (request.method !== "POST") {
         return json(
           {
@@ -91,207 +62,219 @@ export default {
         );
       }
 
-      const body = await request.json();
+
+      /* =====================================================
+         JSON POWER AUTOMATE
+         ===================================================== */
+
+      const body =
+        await request.json();
+
 
       const templateName =
-        String(body.template || "")
+        String(
+          body.template || ""
+        )
           .trim()
           .toLowerCase();
+
 
       if (
         templateName !== "reguler" &&
         templateName !== "regular" &&
         templateName !== "prekursor"
       ) {
+
         throw new Error(
           `Template tidak dikenal: ${body.template}`
         );
+
       }
 
-      /*
-       * =====================================================
-       * TEMPLATE
-       * =====================================================
-       */
+
+      /* =====================================================
+         PDF UPLOAD WAJIB
+         ===================================================== */
+
+      const uploadedBase64 =
+        body.pdfBase64 || "";
+
+
+      if (!uploadedBase64) {
+
+        throw new Error(
+          "pdfBase64 wajib dikirim."
+        );
+
+      }
+
+
+      const uploadedBytes =
+        base64ToBytes(
+          uploadedBase64
+        );
+
+
+      validatePdf(
+        uploadedBytes,
+        "pdfBase64"
+      );
+
+
+      /* =====================================================
+         LOAD PDF UPLOAD
+         ===================================================== */
+
+      const uploadedPdf =
+        await PDFDocument.load(
+          uploadedBytes
+        );
+
+
+      const uploadPageCount =
+        uploadedPdf.getPageCount();
+
+
+      if (uploadPageCount < 1) {
+
+        throw new Error(
+          "PDF upload tidak mempunyai halaman."
+        );
+
+      }
+
+
+      /* =====================================================
+         DOWNLOAD TEMPLATE
+         ===================================================== */
 
       const templateUrl =
         templateName === "prekursor"
           ? PREKURSOR_URL
           : REGULER_URL;
 
+
       const templateBytes =
-        await downloadBytes(templateUrl);
+        await downloadBytes(
+          templateUrl
+        );
+
 
       validatePdf(
         templateBytes,
         "Template PDF"
       );
 
-      const pdf =
+
+      const templatePdf =
         await PDFDocument.load(
           templateBytes
         );
 
-      /*
-       * =====================================================
-       * PDF UPLOAD
-       * =====================================================
-       */
 
-      if (!body.pdfBase64) {
-        throw new Error(
-          "pdfBase64 wajib dikirim."
-        );
-      }
+      const templatePageCount =
+        templatePdf.getPageCount();
 
-      const uploadedPdfBytes =
-        base64ToBytes(
-          body.pdfBase64
-        );
 
-      validatePdf(
-        uploadedPdfBytes,
-        "pdfBase64"
-      );
-
-      /*
-       * Baca PDF upload sekali.
-       *
-       * Ini dipakai untuk:
-       * - jumlah halaman
-       * - SKU
-       * - tabel
-       */
-
-      const uploadedDocument =
-        await loadPdfJsDocument(
-          uploadedPdfBytes
-        );
-
-      const jumlahLembar =
-        uploadedDocument.numPages;
-
-      /*
-       * =====================================================
-       * EXTRACT TEXT PDF UPLOAD
-       * =====================================================
-       */
-
-      const uploadPages =
-        await extractPdfPages(
-          uploadedDocument
-        );
-
-      /*
-       * =====================================================
-       * EXTRACT TABLE
-       * =====================================================
-       */
-
-      const uploadTable =
-        extractUploadTable(
-          uploadPages
-        );
-
-      /*
-       * =====================================================
-       * SKU
-       * =====================================================
-       */
-
-      const uploadedText =
-        uploadPages
-          .map(
-            page =>
-              page.text
-          )
-          .join("\n");
-
-      const skuList =
-        extractProductSKUs(
-          uploadedText
-        );
-
-      /*
-       * =====================================================
-       * DATA JSON
-       * =====================================================
-       */
+      /* =====================================================
+         DATA SATU - DUABELAS
+         ===================================================== */
 
       const data = {};
 
-      for (
-        const key of PLACEHOLDERS
-      ) {
+
+      for (const key of PLACEHOLDERS) {
+
         data[key] =
           body[key] === undefined ||
           body[key] === null
             ? ""
             : String(body[key]);
+
       }
 
-      /*
-       * Jumlah lembar disimpan juga
-       * sebagai data internal.
-       */
 
-      data.JumlahLembar =
-        String(jumlahLembar);
-
-      /*
-       * =====================================================
-       * PREKURSOR LOOKUP
-       * =====================================================
-       */
+      /* =====================================================
+         PREKURSOR LOOKUP
+         ===================================================== */
 
       let lookupInfo = null;
+
 
       if (
         templateName === "prekursor"
       ) {
+
+        const uploadedText =
+          await extractPdfText(
+            uploadedBytes
+          );
+
+
+        const skuList =
+          extractProductSKUs(
+            uploadedText
+          );
+
+
         if (
           skuList.length === 0
         ) {
+
           throw new Error(
             "Product SKU tidak ditemukan pada PDF upload."
           );
+
         }
+
 
         const masterCsv =
           await downloadText(
             MASTER_URL
           );
 
+
         const master =
           parseCSV(
             masterCsv
           );
 
+
         let found = null;
         let foundSKU = "";
+
 
         for (
           const sku of skuList
         ) {
+
           const row =
             findSKU(
               master,
               sku
             );
 
+
           if (row) {
+
             found = row;
             foundSKU = sku;
+
             break;
+
           }
+
         }
 
+
         if (!found) {
+
           throw new Error(
-            "SKU tidak ditemukan di master_prekursor.csv. " +
-            `SKU terbaca: ${skuList.join(", ")}`
+            `SKU tidak ditemukan di master_prekursor.csv. SKU terbaca: ${skuList.join(", ")}`
           );
+
         }
+
 
         const zatAktif =
           firstValue(
@@ -304,6 +287,7 @@ export default {
             ]
           );
 
+
         const bentuk =
           firstValue(
             found,
@@ -314,92 +298,413 @@ export default {
             ]
           );
 
-        lookupInfo = {
-          productSKU:
-            foundSKU,
-
-          zatAktif,
-
-          bentuk
-        };
 
         data.ZatAktif =
           zatAktif;
 
+
         data.Bentuk =
           bentuk;
+
+
+        lookupInfo = {
+          productSKU: foundSKU,
+          zatAktif,
+          bentuk
+        };
+
       }
 
-      /*
-       * =====================================================
-       * REPLACE SATU - DUABELAS
-       * =====================================================
-       */
 
-      await replacePlaceholders(
-        pdf,
-        templateBytes,
-        data
-      );
+      /* =====================================================
+         BUAT OUTPUT BARU
+         
+         JUMLAH HALAMAN = PDF UPLOAD
+         ===================================================== */
 
-      /*
-       * =====================================================
-       * JUMLAH LEMBAR
-       * =====================================================
-       */
+      const outputPdf =
+        await PDFDocument.create();
 
-      await replacePageCount(
-        pdf,
-        templateBytes,
-        jumlahLembar
-      );
 
       /*
-       * =====================================================
-       * MASUKKAN TABEL
-       * =====================================================
+       * Embed semua template page.
+       *
+       * Jika template cuma 1 halaman,
+       * halaman tersebut digunakan untuk semua halaman upload.
        */
+
+      const templatePages = [];
+
+
+      for (
+        let i = 0;
+        i < templatePageCount;
+        i++
+      ) {
+
+        const copied =
+          await outputPdf.copyPages(
+            templatePdf,
+            [i]
+          );
+
+        templatePages.push(
+          copied[0]
+        );
+
+      }
+
+
+      /* =====================================================
+         FONT
+         ===================================================== */
+
+      const font =
+        await outputPdf.embedFont(
+          StandardFonts.Helvetica
+        );
+
+
+      /* =====================================================
+         PDF.JS TEMPLATE
+         
+         Dipakai hanya untuk mencari:
+         Satu
+         Dua
+         ...
+         TTD
+         Stempel
+         ===================================================== */
+
+      const templatePdfJs =
+        await getPdfJs();
+
+
+      const templateDocument =
+        await templatePdfJs.getDocument({
+          data:
+            new Uint8Array(
+              templateBytes
+            ),
+          useSystemFonts: true
+        }).promise;
+
+
+      /* =====================================================
+         PREPARE TEMPLATE TEXT POSITION
+         ===================================================== */
+
+      const templateLocations = [];
+
+
+      for (
+        let pageNo = 1;
+        pageNo <= templateDocument.numPages;
+        pageNo++
+      ) {
+
+        const sourcePage =
+          await templateDocument.getPage(
+            pageNo
+          );
+
+
+        const content =
+          await sourcePage.getTextContent();
+
+
+        const items =
+          content.items || [];
+
+
+        templateLocations.push(
+          {
+            pageNo,
+            items
+          }
+        );
+
+      }
+
+
+      /* =====================================================
+         COPY TEMPLATE UNTUK SETIAP PAGE UPLOAD
+         ===================================================== */
+
+      const finalPages = [];
+
+
+      for (
+        let i = 0;
+        i < uploadPageCount;
+        i++
+      ) {
+
+        /*
+         * Template page yang digunakan.
+         *
+         * Jika template 1 halaman:
+         * gunakan page 1 untuk semuanya.
+         *
+         * Jika template >1 halaman:
+         * gunakan template page sesuai nomor.
+         */
+
+        const templateIndex =
+          Math.min(
+            i,
+            templatePages.length - 1
+          );
+
+
+        const page =
+          templatePages[
+            templateIndex
+          ];
+
+
+        finalPages.push(page);
+
+      }
+
+
+      /* =====================================================
+         MASUKKAN PDF UPLOAD KE TEMPLATE
+         
+         INI YANG MEMPERTAHANKAN TABEL ASLI
+         ===================================================== */
+
+      for (
+        let i = 0;
+        i < uploadPageCount;
+        i++
+      ) {
+
+        const sourcePage =
+          uploadedPdf.getPages()[i];
+
+
+        const targetPage =
+          finalPages[i];
+
+
+        /*
+         * Ukuran halaman sumber
+         */
+
+        const sourceWidth =
+          sourcePage.getWidth();
+
+
+        const sourceHeight =
+          sourcePage.getHeight();
+
+
+        /*
+         * Ukuran halaman template
+         */
+
+        const targetWidth =
+          targetPage.getWidth();
+
+
+        const targetHeight =
+          targetPage.getHeight();
+
+
+        /*
+         * ==================================================
+         * AREA TABEL
+         *
+         * Kalau PDF upload berisi tabel satu halaman penuh,
+         * kita masukkan ke area tabel template.
+         *
+         * Angka ini sengaja dibuat mudah diubah.
+         * ==================================================
+         */
+
+        const TABLE_X = 20;
+
+        const TABLE_Y = 55;
+
+        const TABLE_WIDTH =
+          targetWidth - 40;
+
+        const TABLE_HEIGHT =
+          targetHeight - 125;
+
+
+        /*
+         * Rasio supaya tabel tidak gepeng.
+         */
+
+        const scaleX =
+          TABLE_WIDTH /
+          sourceWidth;
+
+
+        const scaleY =
+          TABLE_HEIGHT /
+          sourceHeight;
+
+
+        const scale =
+          Math.min(
+            scaleX,
+            scaleY
+          );
+
+
+        const drawWidth =
+          sourceWidth *
+          scale;
+
+
+        const drawHeight =
+          sourceHeight *
+          scale;
+
+
+        const drawX =
+          TABLE_X +
+          (
+            TABLE_WIDTH -
+            drawWidth
+          ) / 2;
+
+
+        const drawY =
+          TABLE_Y +
+          (
+            TABLE_HEIGHT -
+            drawHeight
+          ) / 2;
+
+
+        /*
+         * Embed halaman PDF upload.
+         */
+
+        const embeddedPage =
+          await outputPdf.embedPage(
+            sourcePage
+          );
+
+
+        /*
+         * Gambar tabel PDF asli.
+         */
+
+        targetPage.drawPage(
+          embeddedPage,
+          {
+            x: drawX,
+            y: drawY,
+
+            width: drawWidth,
+            height: drawHeight
+          }
+        );
+
+      }
+
+
+      /* =====================================================
+         REPLACE SATU - DUABELAS
+         ===================================================== */
+
+      for (
+        let i = 0;
+        i < uploadPageCount;
+        i++
+      ) {
+
+        const templateIndex =
+          Math.min(
+            i,
+            templateLocations.length - 1
+          );
+
+
+        const location =
+          templateLocations[
+            templateIndex
+          ];
+
+
+        const targetPage =
+          finalPages[i];
+
+
+        replaceTextOnPage(
+          targetPage,
+          location.items,
+          data,
+          font
+        );
+
+      }
+
+
+      /* =====================================================
+         TTD + STEMPEL
+         ===================================================== */
+
+      const ttdInput =
+        body.ttdBase64 || "";
+
+
+      const stampInput =
+        body.stempelBase64 || "";
+
 
       if (
-        uploadTable.rows.length > 0
+        ttdInput ||
+        stampInput
       ) {
-        await drawTableIntoTemplate(
-          pdf,
-          templateBytes,
-          uploadTable
+
+        await placeSignatureAndStamp(
+          outputPdf,
+          finalPages,
+          templateLocations,
+          ttdInput,
+          stampInput
         );
+
       }
 
-      /*
-       * =====================================================
-       * TTD + STEMPEL
-       * =====================================================
-       */
 
-      await placeSignatureAndStamp(
-        pdf,
-        templateBytes,
-        body.ttdBase64 || "",
-        body.stempelBase64 || ""
-      );
+      /* =====================================================
+         DESTROY PDF.JS
+         ===================================================== */
 
-      /*
-       * =====================================================
-       * SAVE
-       * =====================================================
-       */
+      try {
+
+        await templateDocument.destroy();
+
+      } catch (_) {}
+
+
+      /* =====================================================
+         SAVE
+         ===================================================== */
 
       const outputBytes =
-        await pdf.save({
-          useObjectStreams: false
-        });
+        await outputPdf.save();
+
 
       const outputBase64 =
         bytesToBase64(
           outputBytes
         );
 
+
+      /* =====================================================
+         RESPONSE
+         ===================================================== */
+
       const result = {
+
         success: true,
 
         message:
@@ -410,27 +715,20 @@ export default {
             ? "Prekursor"
             : "Reguler",
 
-        /*
-         * INI JUMLAH HALAMAN PDF UPLOAD,
-         * BUKAN jumlah halaman template.
-         */
-        pages:
-          jumlahLembar,
+        inputPages:
+          uploadPageCount,
 
-        jumlahLembar:
-          jumlahLembar,
-
-        tableRows:
-          uploadTable.rows.length,
-
-        sku:
-          skuList,
+        outputPages:
+          outputPdf.getPageCount(),
 
         spBase64:
           outputBase64
+
       };
 
+
       if (lookupInfo) {
+
         result.productSKU =
           lookupInfo.productSKU;
 
@@ -439,13 +737,17 @@ export default {
 
         result.bentuk =
           lookupInfo.bentuk;
+
       }
+
 
       return json(
         result
       );
 
+
     } catch (error) {
+
       return json(
         {
           success: false,
@@ -453,495 +755,161 @@ export default {
           message:
             error?.message ||
             "Terjadi error pada Worker."
+
         },
         500
       );
+
     }
+
   }
 };
 
 
 /* =========================================================
- * PDF.JS
- * ========================================================= */
+   REPLACE TEXT
+   ========================================================= */
 
-let pdfJsPromise = null;
-
-async function getPdfJs() {
-  if (!pdfJsPromise) {
-    pdfJsPromise =
-      import(
-        "pdfjs-serverless"
-      );
-  }
-
-  return pdfJsPromise;
-}
-
-
-async function loadPdfJsDocument(
-  bytes
+function replaceTextOnPage(
+  page,
+  items,
+  data,
+  font
 ) {
-  const pdfjs =
-    await getPdfJs();
 
-  return pdfjs
-    .getDocument({
-      data:
-        new Uint8Array(
-          bytes
-        ),
-      useSystemFonts: true
-    })
-    .promise;
-}
+  /*
+   * Kita proses placeholder satu kali saja.
+   */
 
+  const used = new Set();
 
-/* =========================================================
- * EXTRACT PDF PAGES
- * ========================================================= */
-
-async function extractPdfPages(
-  document
-) {
-  const pages = [];
 
   for (
-    let pageNumber = 1;
-    pageNumber <= document.numPages;
-    pageNumber++
+    const key of PLACEHOLDERS
   ) {
-    const page =
-      await document.getPage(
-        pageNumber
-      );
 
-    const content =
-      await page.getTextContent();
-
-    const items =
-      (content.items || [])
-        .filter(
-          item =>
-            typeof item.str === "string" &&
-            item.str.trim() !== ""
-        )
-        .map(
-          item => ({
-            str:
-              String(item.str),
-
-            x:
-              Number(
-                item.transform?.[4] || 0
-              ),
-
-            y:
-              Number(
-                item.transform?.[5] || 0
-              ),
-
-            width:
-              Number(
-                item.width || 0
-              ),
-
-            height:
-              Math.abs(
-                Number(
-                  item.transform?.[3] ||
-                  10
-                )
-              )
-          })
-        );
-
-    pages.push({
-      pageNumber,
-
-      items,
-
-      text:
-        items
-          .map(
-            x =>
-              x.str
-          )
-          .join(" ")
-    });
-  }
-
-  return pages;
-}
-
-
-/* =========================================================
- * REPLACE PLACEHOLDERS
- * ========================================================= */
-
-async function replacePlaceholders(
-  pdf,
-  templateBytes,
-  data
-) {
-  const source =
-    await loadPdfJsDocument(
-      templateBytes
-    );
-
-  const font =
-    await pdf.embedFont(
-      StandardFonts.Helvetica
-    );
-
-  const pages =
-    pdf.getPages();
-
-  for (
-    let pageIndex = 0;
-    pageIndex < source.numPages;
-    pageIndex++
-  ) {
-    const sourcePage =
-      await source.getPage(
-        pageIndex + 1
-      );
-
-    const textContent =
-      await sourcePage.getTextContent();
-
-    const items =
-      (textContent.items || [])
-        .filter(
-          item =>
-            typeof item.str === "string" &&
-            item.str.trim() !== ""
-        );
-
-    const targetPage =
-      pages[pageIndex];
-
-    if (!targetPage) {
-      continue;
-    }
-
-    /*
-     * Setiap key hanya dicari satu kali
-     * pada posisi exact.
-     */
-
-    const used =
-      new Set();
-
-    for (
-      const key of PLACEHOLDERS
+    if (
+      used.has(key)
     ) {
-      const value =
-        String(
-          data[key] ?? ""
-        );
-
-      let index =
-        items.findIndex(
-          item =>
-            String(
-              item.str
-            ).trim() === key
-        );
-
-      /*
-       * Kalau exact item tidak ditemukan,
-       * cari item yang mengandung key.
-       */
-
-      if (
-        index === -1
-      ) {
-        index =
-          items.findIndex(
-            item =>
-              String(
-                item.str
-              ).includes(key)
-          );
-      }
-
-      if (
-        index === -1
-      ) {
-        continue;
-      }
-
-      const item =
-        items[index];
-
-      const transform =
-        item.transform;
-
-      if (!transform) {
-        continue;
-      }
-
-      const x =
-        Number(
-          transform[4] || 0
-        );
-
-      const y =
-        Number(
-          transform[5] || 0
-        );
-
-      const fontSize =
-        Math.max(
-          6,
-          Math.abs(
-            Number(
-              transform[3] || 10
-            )
-          )
-        );
-
-      const width =
-        Math.max(
-          Number(
-            item.width || 0
-          ),
-          key.length *
-            fontSize *
-            0.5
-        );
-
-      const marker =
-        `${pageIndex}:${Math.round(x)}:${Math.round(y)}:${key}`;
-
-      if (
-        used.has(marker)
-      ) {
-        continue;
-      }
-
-      used.add(marker);
-
-      /*
-       * Tutup placeholder.
-       */
-
-      targetPage.drawRectangle({
-        x:
-          x - 1,
-
-        y:
-          y - fontSize - 2,
-
-        width:
-          width + 4,
-
-        height:
-          fontSize + 5,
-
-        color:
-          rgb(
-            1,
-            1,
-            1
-          )
-      });
-
-      if (
-        !value.trim()
-      ) {
-        continue;
-      }
-
-      /*
-       * Untuk text panjang,
-       * kita pecah berdasarkan panjang.
-       */
-
-      const maxChars =
-        Math.max(
-          20,
-          Math.floor(
-            80 -
-            fontSize
-          )
-        );
-
-      const lines =
-        wrapText(
-          value,
-          maxChars
-        );
-
-      for (
-        let lineIndex = 0;
-        lineIndex < lines.length;
-        lineIndex++
-      ) {
-        targetPage.drawText(
-          lines[lineIndex],
-          {
-            x,
-
-            y:
-              y -
-              fontSize +
-              1 -
-              lineIndex *
-                fontSize *
-                1.15,
-
-            size:
-              fontSize,
-
-            font,
-
-            color:
-              rgb(
-                0,
-                0,
-                0
-              )
-          }
-        );
-      }
+      continue;
     }
-  }
-
-  try {
-    await source.destroy();
-  } catch (_) {}
-}
 
 
-/* =========================================================
- * JUMLAH LEMBAR
- * ========================================================= */
-
-async function replacePageCount(
-  pdf,
-  templateBytes,
-  jumlahLembar
-) {
-  const source =
-    await loadPdfJsDocument(
-      templateBytes
-    );
-
-  const font =
-    await pdf.embedFont(
-      StandardFonts.Helvetica
-    );
-
-  const pages =
-    pdf.getPages();
-
-  for (
-    let pageIndex = 0;
-    pageIndex < source.numPages;
-    pageIndex++
-  ) {
-    const sourcePage =
-      await source.getPage(
-        pageIndex + 1
+    const match =
+      findBestTextMatch(
+        items,
+        key
       );
 
-    const content =
-      await sourcePage.getTextContent();
 
-    const items =
-      content.items || [];
-
-    const targetPage =
-      pages[pageIndex];
-
-    if (!targetPage) {
+    if (!match) {
       continue;
     }
 
-    let found = null;
 
-    for (
-      const item of items
-    ) {
-      const text =
-        String(
-          item.str || ""
-        ).trim();
+    used.add(key);
 
-      if (
-        PAGE_PLACEHOLDERS.includes(
-          text
-        )
-      ) {
-        found = item;
-        break;
-      }
-    }
 
-    if (!found) {
-      continue;
-    }
+    const value =
+      String(
+        data[key] ?? ""
+      );
+
+
+    const t =
+      match.transform || [];
+
 
     const x =
-      Number(
-        found.transform?.[4] || 0
-      );
+      Number(t[4] || 0);
 
-    const y =
-      Number(
-        found.transform?.[5] || 0
-      );
 
-    const size =
+    const baselineY =
+      Number(t[5] || 0);
+
+
+    const fontSize =
       Math.max(
-        7,
+        6,
         Math.abs(
           Number(
-            found.transform?.[3] ||
-            10
+            t[3] || 10
           )
         )
       );
 
-    targetPage.drawRectangle({
+
+    const originalWidth =
+      Math.max(
+        Number(
+          match.width || 0
+        ),
+        key.length *
+        fontSize *
+        0.45
+      );
+
+
+    /*
+     * Tutup HANYA area placeholder.
+     */
+
+    page.drawRectangle({
+
       x:
         x - 2,
 
       y:
-        y - size - 2,
+        baselineY -
+        fontSize -
+        3,
 
       width:
-        Math.max(
-          Number(
-            found.width || 0
-          ),
-          80
-        ) + 4,
+        originalWidth + 5,
 
       height:
-        size + 6,
+        fontSize + 6,
 
       color:
         rgb(
           1,
           1,
           1
-        )
+        ),
+
+      opacity: 1
+
     });
 
-    targetPage.drawText(
-      String(
-        jumlahLembar
-      ),
+
+    /*
+     * Kalau kosong:
+     * placeholder sudah dihapus.
+     */
+
+    if (
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+
+    /*
+     * Tulis pada baseline yang sama.
+     */
+
+    page.drawText(
+      value,
       {
+
         x,
 
         y:
-          y - size + 1,
+          baselineY -
+          1,
 
-        size,
+        size:
+          fontSize,
 
         font,
 
@@ -950,728 +918,217 @@ async function replacePageCount(
             0,
             0,
             0
-          )
+          ),
+
+        lineHeight:
+          fontSize * 1.15
+
       }
     );
 
-    break;
   }
 
-  try {
-    await source.destroy();
-  } catch (_) {}
 }
 
 
 /* =========================================================
- * TABLE EXTRACTION
- * ========================================================= */
+   FIND TEXT
+   ========================================================= */
 
-function extractUploadTable(
-  pages
+function findBestTextMatch(
+  items,
+  target
 ) {
-  const rows = [];
+
+  /*
+   * 1. Exact / contains dalam satu item.
+   */
 
   for (
-    const page of pages
+    const item of items
   ) {
-    const groups =
-      groupItemsByY(
-        page.items
-      );
-
-    let headerIndex = -1;
-
-    for (
-      let i = 0;
-      i < groups.length;
-      i++
-    ) {
-      const text =
-        groups[i]
-          .map(
-            x =>
-              x.str
-          )
-          .join(" ");
-
-      if (
-        /Product\s*SKU/i.test(text) &&
-        /Product\s*Description/i.test(text)
-      ) {
-        headerIndex = i;
-        break;
-      }
-    }
 
     if (
-      headerIndex === -1
+      typeof item.str !== "string"
     ) {
       continue;
     }
 
-    const header =
-      groups[headerIndex];
 
-    const columns =
-      detectColumns(
-        header
-      );
+    if (
+      item.str.includes(target)
+    ) {
+
+      return {
+
+        transform:
+          item.transform,
+
+        width:
+          item.width || 0,
+
+        text:
+          item.str
+
+      };
+
+    }
+
+  }
+
+
+  /*
+   * 2. Kalau PDF memecah kata.
+   */
+
+  for (
+    let i = 0;
+    i < items.length;
+    i++
+  ) {
+
+    const first =
+      items[i];
+
+
+    if (
+      !first ||
+      typeof first.str !== "string"
+    ) {
+      continue;
+    }
+
+
+    let combined =
+      "";
+
+
+    let last =
+      first;
+
 
     for (
-      let i =
-        headerIndex + 1;
-      i < groups.length;
-      i++
+      let j = i;
+      j < Math.min(
+        i + 8,
+        items.length
+      );
+      j++
     ) {
-      const group =
-        groups[i];
 
-      const text =
-        group
-          .map(
-            x =>
-              x.str
-          )
-          .join(" ")
-          .trim();
+      const item =
+        items[j];
 
-      /*
-       * Stop kalau sudah masuk
-       * footer / halaman berikut.
-       */
 
       if (
-        !text ||
-        /^Page\s+\d+/i.test(text)
+        !item ||
+        typeof item.str !== "string"
       ) {
         continue;
       }
 
-      const cells =
-        mapItemsToColumns(
-          group,
-          columns
-        );
+
+      combined +=
+        item.str;
+
+
+      last =
+        item;
+
 
       if (
-        cells.some(
-          x =>
-            x.trim() !== ""
+        combined.includes(
+          target
         )
       ) {
-        rows.push(
-          cells
-        );
-      }
-    }
-  }
 
-  return {
-    columns:
-      UPLOAD_HEADERS,
+        return {
 
-    rows
-  };
-}
+          transform:
+            first.transform,
 
-
-/* =========================================================
- * GROUP PDF TEXT BY Y
- * ========================================================= */
-
-function groupItemsByY(
-  items
-) {
-  const sorted =
-    [...items]
-      .sort(
-        (a, b) =>
-          b.y - a.y ||
-          a.x - b.x
-      );
-
-  const groups = [];
-
-  for (
-    const item of sorted
-  ) {
-    let group =
-      groups.find(
-        g =>
-          Math.abs(
-            g.y - item.y
-          ) <= 3
-      );
-
-    if (!group) {
-      group = {
-        y:
-          item.y,
-
-        items: []
-      };
-
-      groups.push(
-        group
-      );
-    }
-
-    group.items.push(
-      item
-    );
-  }
-
-  return groups
-    .sort(
-      (a, b) =>
-        b.y - a.y
-    )
-    .map(
-      g =>
-        g.items.sort(
-          (a, b) =>
-            a.x - b.x
-        )
-    );
-}
-
-
-/* =========================================================
- * DETECT COLUMNS
- * ========================================================= */
-
-function detectColumns(
-  headerItems
-) {
-  const result = [];
-
-  for (
-    const header of UPLOAD_HEADERS
-  ) {
-    const words =
-      header
-        .toLowerCase()
-        .split(/\s+/);
-
-    let found =
-      headerItems.find(
-        item =>
-          item.str
-            .toLowerCase()
-            .includes(
-              words[0]
-            )
-      );
-
-    if (!found) {
-      found =
-        headerItems.find(
-          item =>
-            words.some(
-              word =>
-                item.str
-                  .toLowerCase()
-                  .includes(
-                    word
-                  )
-            )
-        );
-    }
-
-    result.push({
-      name:
-        header,
-
-      x:
-        found
-          ? found.x
-          : result.length *
-            60
-    });
-  }
-
-  return result;
-}
-
-
-/* =========================================================
- * MAP ITEMS → COLUMNS
- * ========================================================= */
-
-function mapItemsToColumns(
-  items,
-  columns
-) {
-  const cells =
-    columns.map(
-      () => []
-    );
-
-  for (
-    const item of items
-  ) {
-    let bestIndex = 0;
-    let bestDistance =
-      Infinity;
-
-    for (
-      let i = 0;
-      i < columns.length;
-      i++
-    ) {
-      const distance =
-        Math.abs(
-          item.x -
-          columns[i].x
-        );
-
-      if (
-        distance <
-        bestDistance
-      ) {
-        bestDistance =
-          distance;
-
-        bestIndex =
-          i;
-      }
-    }
-
-    cells[
-      bestIndex
-    ].push(
-      item.str
-    );
-  }
-
-  return cells.map(
-    cell =>
-      cell
-        .join(" ")
-        .trim()
-  );
-}
-
-
-/* =========================================================
- * DRAW TABLE
- * ========================================================= */
-
-async function drawTableIntoTemplate(
-  pdf,
-  templateBytes,
-  table
-) {
-  const source =
-    await loadPdfJsDocument(
-      templateBytes
-    );
-
-  const font =
-    await pdf.embedFont(
-      StandardFonts.Helvetica
-    );
-
-  const pages =
-    pdf.getPages();
-
-  /*
-   * Cari halaman template yang mempunyai
-   * header tabel.
-   */
-
-  for (
-    let pageIndex = 0;
-    pageIndex < source.numPages;
-    pageIndex++
-  ) {
-    const sourcePage =
-      await source.getPage(
-        pageIndex + 1
-      );
-
-    const content =
-      await sourcePage.getTextContent();
-
-    const items =
-      (content.items || [])
-        .filter(
-          item =>
-            typeof item.str ===
-              "string" &&
-            item.str.trim()
-        );
-
-    const header =
-      findTemplateTableHeader(
-        items
-      );
-
-    if (!header) {
-      continue;
-    }
-
-    const targetPage =
-      pages[pageIndex];
-
-    if (!targetPage) {
-      continue;
-    }
-
-    /*
-     * Tentukan area tabel
-     * berdasarkan posisi header.
-     */
-
-    const startX =
-      Math.min(
-        ...header.map(
-          x =>
-            Number(
-              x.transform?.[4] ||
-              0
-            )
-        )
-      );
-
-    const headerY =
-      Math.max(
-        ...header.map(
-          x =>
-            Number(
-              x.transform?.[5] ||
-              0
-            )
-        )
-      );
-
-    /*
-     * Lebar halaman.
-     */
-
-    const pageWidth =
-      targetPage.getWidth();
-
-    const pageHeight =
-      targetPage.getHeight();
-
-    const left =
-      Math.max(
-        25,
-        startX - 5
-      );
-
-    const right =
-      pageWidth - 25;
-
-    const tableWidth =
-      right - left;
-
-    /*
-     * Hapus area isi tabel lama,
-     * tetapi tidak menghapus seluruh halaman.
-     */
-
-    const rowHeight = 18;
-
-    const maxRows =
-      Math.floor(
-        (headerY - 40) /
-        rowHeight
-      );
-
-    const rowsToDraw =
-      table.rows.slice(
-        0,
-        Math.max(
-          1,
-          maxRows
-        )
-      );
-
-    /*
-     * Lebar kolom.
-     *
-     * Disesuaikan dengan tabel
-     * PDF upload Guardian.
-     */
-
-    const ratios = [
-      0.05,
-      0.10,
-      0.22,
-      0.09,
-      0.09,
-      0.17,
-      0.12,
-      0.16
-    ];
-
-    const widths =
-      ratios.map(
-        ratio =>
-          tableWidth *
-          ratio
-      );
-
-    /*
-     * Mulai di bawah header.
-     */
-
-    let y =
-      headerY -
-      28;
-
-    /*
-     * Tutup area data lama.
-     */
-
-    targetPage.drawRectangle({
-      x:
-        left - 2,
-
-      y:
-        Math.max(
-          25,
-          y -
-            rowsToDraw.length *
-              rowHeight -
-            5
-        ),
-
-      width:
-        tableWidth + 4,
-
-      height:
-        rowsToDraw.length *
-          rowHeight +
-        10,
-
-      color:
-        rgb(
-          1,
-          1,
-          1
-        )
-    });
-
-    /*
-     * Gambar rows.
-     */
-
-    for (
-      const row of rowsToDraw
-    ) {
-      let x =
-        left;
-
-      for (
-        let col = 0;
-        col < widths.length;
-        col++
-      ) {
-        const width =
-          widths[col];
-
-        targetPage.drawRectangle({
-          x,
-
-          y:
-            y -
-            rowHeight,
-
-          width,
-
-          height:
-            rowHeight,
-
-          borderColor:
-            rgb(
-              0,
-              0,
-              0
+          width:
+            combinedWidth(
+              first,
+              last
             ),
 
-          borderWidth:
-            0.5
-        });
+          text:
+            combined
 
-        const value =
-          String(
-            row[col] || ""
-          );
+        };
 
-        if (value) {
-          targetPage.drawText(
-            fitText(
-              value,
-              font,
-              7,
-              width - 4
-            ),
-            {
-              x:
-                x + 2,
-
-              y:
-                y -
-                12,
-
-              size:
-                7,
-
-              font,
-
-              color:
-                rgb(
-                  0,
-                  0,
-                  0
-                )
-            }
-          );
-        }
-
-        x +=
-          width;
       }
 
-      y -=
-        rowHeight;
-
-      if (
-        y < 30
-      ) {
-        break;
-      }
     }
 
-    break;
   }
 
-  try {
-    await source.destroy();
-  } catch (_) {}
+
+  return null;
+
 }
 
 
 /* =========================================================
- * FIND TEMPLATE TABLE HEADER
- * ========================================================= */
+   COMBINED WIDTH
+   ========================================================= */
 
-function findTemplateTableHeader(
-  items
+function combinedWidth(
+  first,
+  last
 ) {
-  const matches = [];
 
-  for (
-    const item of items
-  ) {
-    const text =
-      String(
-        item.str || ""
-      ).trim();
-
-    if (
-      TABLE_HEADER_HINTS.some(
-        hint =>
-          text
-            .toLowerCase()
-            .includes(
-              hint.toLowerCase()
-            )
-      )
-    ) {
-      matches.push(
-        item
-      );
-    }
-  }
-
-  /*
-   * Kita butuh minimal 2 header.
-   */
-
-  if (
-    matches.length < 2
-  ) {
-    return null;
-  }
-
-  /*
-   * Ambil yang berada pada
-   * baris Y yang sama.
-   */
-
-  const firstY =
+  const x1 =
     Number(
-      matches[0]
-        .transform?.[5] ||
-      0
+      first?.transform?.[4] || 0
     );
 
-  const sameRow =
-    matches.filter(
-      item =>
-        Math.abs(
-          Number(
-            item.transform?.[5] ||
-            0
-          ) -
-          firstY
-        ) <= 5
+
+  const x2 =
+    Number(
+      last?.transform?.[4] || 0
     );
 
-  if (
-    sameRow.length < 2
-  ) {
-    return null;
-  }
 
-  return sameRow
-    .sort(
-      (a, b) =>
-        Number(
-          a.transform?.[4] ||
-          0
-        ) -
-        Number(
-          b.transform?.[4] ||
-          0
-        )
-    );
+  return (
+    Math.abs(
+      x2 - x1
+    ) +
+    Number(
+      last?.width || 0
+    )
+  );
+
 }
 
 
 /* =========================================================
- * TTD + STEMPEL
- * ========================================================= */
+   TTD + STEMPEL
+   ========================================================= */
 
 async function placeSignatureAndStamp(
-  pdf,
-  templateBytes,
+  outputPdf,
+  finalPages,
+  templateLocations,
   ttdInput,
   stampInput
 ) {
-  if (
-    !ttdInput &&
-    !stampInput
-  ) {
-    return;
-  }
 
   let ttdImage =
     null;
 
+
   let stampImage =
     null;
 
-  /*
-   * TTD
-   */
+
+  /* =======================================================
+     TTD
+     ======================================================= */
 
   if (ttdInput) {
+
     const bytes =
       base64ToBytes(
         extractImageBase64(
@@ -1679,26 +1136,34 @@ async function placeSignatureAndStamp(
         )
       );
 
+
     if (
       isJpg(bytes)
     ) {
+
       ttdImage =
-        await pdf.embedJpg(
+        await outputPdf.embedJpg(
           bytes
         );
+
     } else {
+
       ttdImage =
-        await pdf.embedPng(
+        await outputPdf.embedPng(
           bytes
         );
+
     }
+
   }
 
-  /*
-   * STEMPEL
-   */
+
+  /* =======================================================
+     STEMPEL
+     ======================================================= */
 
   if (stampInput) {
+
     const bytes =
       base64ToBytes(
         extractImageBase64(
@@ -1706,100 +1171,101 @@ async function placeSignatureAndStamp(
         )
       );
 
+
     if (
       isJpg(bytes)
     ) {
+
       stampImage =
-        await pdf.embedJpg(
+        await outputPdf.embedJpg(
           bytes
         );
+
     } else {
+
       stampImage =
-        await pdf.embedPng(
+        await outputPdf.embedPng(
           bytes
         );
+
     }
+
   }
 
-  const source =
-    await loadPdfJsDocument(
-      templateBytes
-    );
 
-  const pages =
-    pdf.getPages();
+  /* =======================================================
+     SETIAP HALAMAN
+     ======================================================= */
 
   for (
-    let pageIndex = 0;
-    pageIndex < source.numPages;
-    pageIndex++
+    let i = 0;
+    i < finalPages.length;
+    i++
   ) {
-    const sourcePage =
-      await source.getPage(
-        pageIndex + 1
+
+    const page =
+      finalPages[i];
+
+
+    const locationIndex =
+      Math.min(
+        i,
+        templateLocations.length - 1
       );
 
-    const content =
-      await sourcePage.getTextContent();
 
     const items =
-      content.items || [];
+      templateLocations[
+        locationIndex
+      ]?.items || [];
 
-    const targetPage =
-      pages[pageIndex];
 
-    if (!targetPage) {
-      continue;
-    }
-
-    /*
-     * =====================================================
-     * TTD
-     * =====================================================
-     */
+    /* =====================================================
+       TTD
+       ===================================================== */
 
     if (ttdImage) {
-      const item =
-        items.find(
-          x =>
-            String(
-              x.str || ""
-            )
-              .trim()
-              .toLowerCase() ===
-            "ttd"
+
+      const match =
+        findBestTextMatch(
+          items,
+          "TTD"
         );
 
-      if (item) {
+
+      if (match) {
+
         const x =
           Number(
-            item.transform?.[4] ||
-            0
+            match.transform?.[4] || 0
           );
+
 
         const y =
           Number(
-            item.transform?.[5] ||
-            0
+            match.transform?.[5] || 0
           );
 
-        const width =
-          Math.max(
-            Number(
-              item.width || 30
-            ),
-            30
-          );
 
-        targetPage.drawRectangle({
+        /*
+         * Hapus keyword.
+         */
+
+        page.drawRectangle({
+
           x:
-            x - 4,
+            x - 5,
 
           y:
             y - 15,
 
           width:
-            width + 8,
+            Math.max(
+              Number(
+                match.width || 30
+              ),
+              30
+            ) + 10,
 
           height:
             25,
@@ -1810,83 +1276,84 @@ async function placeSignatureAndStamp(
               1,
               1
             )
+
         });
 
+
         /*
-         * Posisi TTD.
-         *
-         * Dipertahankan seperti
-         * setting yang sebelumnya
-         * sudah berhasil.
+         * TTD.
          */
 
-        targetPage.drawImage(
+        page.drawImage(
           ttdImage,
           {
+
             x:
-              x - 15,
+              x - 10,
 
             y:
-              y + 3,
+              y + 2,
 
             width:
               105,
 
             height:
               55
+
           }
         );
+
       }
+
     }
 
-    /*
-     * =====================================================
-     * STEMPEL
-     * =====================================================
-     */
+
+    /* =====================================================
+       STEMPEL
+       ===================================================== */
 
     if (stampImage) {
-      const item =
-        items.find(
-          x =>
-            String(
-              x.str || ""
-            )
-              .trim()
-              .toLowerCase() ===
-            "stempel"
+
+      const match =
+        findBestTextMatch(
+          items,
+          "Stempel"
         );
 
-      if (item) {
+
+      if (match) {
+
         const x =
           Number(
-            item.transform?.[4] ||
-            0
+            match.transform?.[4] || 0
           );
+
 
         const y =
           Number(
-            item.transform?.[5] ||
-            0
+            match.transform?.[5] || 0
           );
 
-        const width =
-          Math.max(
-            Number(
-              item.width || 50
-            ),
-            50
-          );
 
-        targetPage.drawRectangle({
+        /*
+         * Hapus keyword.
+         */
+
+        page.drawRectangle({
+
           x:
-            x - 4,
+            x - 5,
 
           y:
             y - 15,
 
           width:
-            width + 8,
+            Math.max(
+              Number(
+                match.width || 50
+              ),
+              50
+            ) + 10,
 
           height:
             25,
@@ -1897,16 +1364,23 @@ async function placeSignatureAndStamp(
               1,
               1
             )
+
         });
 
-        targetPage.drawImage(
+
+        /*
+         * Stempel.
+         */
+
+        page.drawImage(
           stampImage,
           {
+
             x:
               x - 5,
 
             y:
-              y - 48,
+              y - 42,
 
             width:
               85,
@@ -1916,26 +1390,131 @@ async function placeSignatureAndStamp(
 
             opacity:
               0.85
+
           }
         );
+
       }
+
     }
+
   }
 
-  try {
-    await source.destroy();
-  } catch (_) {}
 }
 
 
 /* =========================================================
- * SKU
- * ========================================================= */
+   EXTRACT PDF TEXT
+   ========================================================= */
+
+async function extractPdfText(
+  pdfBytes
+) {
+
+  const pdfjs =
+    await getPdfJs();
+
+
+  const document =
+    await pdfjs.getDocument({
+
+      data:
+        new Uint8Array(
+          pdfBytes
+        ),
+
+      useSystemFonts:
+        true
+
+    }).promise;
+
+
+  const pages = [];
+
+
+  for (
+    let i = 1;
+    i <= document.numPages;
+    i++
+  ) {
+
+    const page =
+      await document.getPage(
+        i
+      );
+
+
+    const content =
+      await page.getTextContent();
+
+
+    const text =
+      content.items
+        .map(
+          item =>
+            typeof item.str === "string"
+              ? item.str
+              : ""
+        )
+        .join(" ");
+
+
+    pages.push(
+      text
+    );
+
+  }
+
+
+  try {
+
+    await document.destroy();
+
+  } catch (_) {}
+
+
+  return pages.join(
+    "\n"
+  );
+
+}
+
+
+/* =========================================================
+   PDF.JS
+   ========================================================= */
+
+let pdfJsPromise =
+  null;
+
+
+async function getPdfJs() {
+
+  if (!pdfJsPromise) {
+
+    pdfJsPromise =
+      import(
+        "pdfjs-serverless"
+      );
+
+  }
+
+
+  return pdfJsPromise;
+
+}
+
+
+/* =========================================================
+   SKU
+   ========================================================= */
 
 function extractProductSKUs(
   text
 ) {
+
   const result = [];
+
 
   const normalized =
     String(
@@ -1947,48 +1526,58 @@ function extractProductSKUs(
       )
       .trim();
 
+
   const patterns = [
+
     /Product\s*SKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i,
 
     /ProductSKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i,
 
     /SKU\s*[:#-]?\s*([A-Za-z0-9-]+)/i
+
   ];
+
 
   for (
     const pattern of patterns
   ) {
+
     const match =
       normalized.match(
         pattern
       );
 
+
     if (
       match &&
       match[1]
     ) {
+
       result.push(
         match[1]
       );
+
     }
+
   }
 
-  /*
-   * Fallback angka.
-   */
 
   if (
     result.length === 0
   ) {
+
     const fallback =
       normalized.match(
         /\b\d{5,12}\b/g
       ) || [];
 
+
     result.push(
       ...fallback
     );
+
   }
+
 
   return [
     ...new Set(
@@ -2000,31 +1589,38 @@ function extractProductSKUs(
       )
     )
   ];
+
 }
 
 
 /* =========================================================
- * CSV
- * ========================================================= */
+   CSV
+   ========================================================= */
 
 function parseCSV(
   text
 ) {
-  const clean =
+
+  const cleanText =
     String(
       text || ""
-    ).replace(
-      /^\uFEFF/,
-      ""
-    );
+    )
+      .replace(
+        /^\uFEFF/,
+        ""
+      );
+
 
   const lines =
-    clean
-      .split(/\r?\n/)
+    cleanText
+      .split(
+        /\r?\n/
+      )
       .filter(
         line =>
-          line.trim()
+          line.trim() !== ""
       );
+
 
   if (
     lines.length === 0
@@ -2032,126 +1628,163 @@ function parseCSV(
     return [];
   }
 
+
   const headers =
     parseCSVLine(
       lines[0]
     );
 
+
   const rows = [];
+
 
   for (
     let i = 1;
     i < lines.length;
     i++
   ) {
+
     const values =
       parseCSVLine(
         lines[i]
       );
 
+
     const row = {};
+
 
     for (
       let j = 0;
       j < headers.length;
       j++
     ) {
+
       row[
         headers[j]
       ] =
-        values[j] ??
-        "";
+        values[j] ?? "";
+
     }
+
 
     rows.push(
       row
     );
+
   }
 
+
   return rows;
+
 }
 
+
+/* =========================================================
+   CSV LINE
+   ========================================================= */
 
 function parseCSVLine(
   line
 ) {
+
   const result = [];
 
-  let current =
-    "";
 
-  let quoted =
-    false;
+  let current = "";
+  let quoted = false;
+
 
   for (
     let i = 0;
     i < line.length;
     i++
   ) {
+
     const char =
       line[i];
+
 
     if (
       char === '"'
     ) {
+
       if (
         quoted &&
         line[i + 1] === '"'
       ) {
-        current +=
-          '"';
 
+        current += '"';
         i++;
 
       } else {
+
         quoted =
           !quoted;
+
       }
 
     } else if (
       char === "," &&
       !quoted
     ) {
+
       result.push(
         current.trim()
       );
+
 
       current =
         "";
 
     } else {
+
       current +=
         char;
+
     }
+
   }
+
 
   result.push(
     current.trim()
   );
 
+
   return result;
+
 }
 
+
+/* =========================================================
+   FIND SKU
+   ========================================================= */
 
 function findSKU(
   rows,
   sku
 ) {
+
   const target =
     normalizeSKU(
       sku
     );
 
+
   return (
     rows.find(
       row => {
+
         const values = [
+
           row["Product SKU"],
           row["ProductSKU"],
           row["SKU"],
           row["Sku"],
           row["sku"]
+
         ];
+
 
         return values.some(
           value =>
@@ -2159,22 +1792,31 @@ function findSKU(
               value
             ) === target
         );
+
       }
-    ) ||
-    null
+    ) || null
   );
+
 }
 
+
+/* =========================================================
+   NORMALIZE SKU
+   ========================================================= */
 
 function normalizeSKU(
   value
 ) {
+
   if (
     value === undefined ||
     value === null
   ) {
+
     return "";
+
   }
+
 
   return String(
     value
@@ -2185,130 +1827,50 @@ function normalizeSKU(
       ""
     )
     .toUpperCase();
+
 }
 
+
+/* =========================================================
+   FIRST VALUE
+   ========================================================= */
 
 function firstValue(
   object,
   keys
 ) {
+
   for (
     const key of keys
   ) {
+
     if (
       object[key] !== undefined &&
       object[key] !== null
     ) {
+
       return String(
         object[key]
       ).trim();
+
     }
+
   }
+
 
   return "";
+
 }
 
 
 /* =========================================================
- * TEXT HELPERS
- * ========================================================= */
-
-function wrapText(
-  text,
-  maxChars
-) {
-  const words =
-    String(
-      text
-    ).split(/\s+/);
-
-  const lines = [];
-
-  let line =
-    "";
-
-  for (
-    const word of words
-  ) {
-    const test =
-      line
-        ? `${line} ${word}`
-        : word;
-
-    if (
-      test.length >
-        maxChars &&
-      line
-    ) {
-      lines.push(
-        line
-      );
-
-      line =
-        word;
-    } else {
-      line =
-        test;
-    }
-  }
-
-  if (
-    line
-  ) {
-    lines.push(
-      line
-    );
-  }
-
-  return lines;
-}
-
-
-function fitText(
-  text,
-  font,
-  size,
-  maxWidth
-) {
-  let result =
-    String(
-      text || ""
-    );
-
-  if (
-    font.widthOfTextAtSize(
-      result,
-      size
-    ) <= maxWidth
-  ) {
-    return result;
-  }
-
-  while (
-    result.length > 3 &&
-    font.widthOfTextAtSize(
-      result + "...",
-      size
-    ) > maxWidth
-  ) {
-    result =
-      result.slice(
-        0,
-        -1
-      );
-  }
-
-  return result + "...";
-}
-
-
-/* =========================================================
- * DOWNLOAD
- * ========================================================= */
+   DOWNLOAD BYTES
+   ========================================================= */
 
 async function downloadBytes(
   url
 ) {
+
   const response =
     await fetch(
       url,
@@ -2320,23 +1882,33 @@ async function downloadBytes(
       }
     );
 
+
   if (
     !response.ok
   ) {
+
     throw new Error(
       `Gagal mengambil file GitHub: HTTP ${response.status}`
     );
+
   }
+
 
   return new Uint8Array(
     await response.arrayBuffer()
   );
+
 }
 
+
+/* =========================================================
+   DOWNLOAD TEXT
+   ========================================================= */
 
 async function downloadText(
   url
 ) {
+
   const response =
     await fetch(
       url,
@@ -2348,32 +1920,39 @@ async function downloadText(
       }
     );
 
+
   if (
     !response.ok
   ) {
+
     throw new Error(
       `Gagal mengambil CSV: HTTP ${response.status}`
     );
+
   }
 
+
   return response.text();
+
 }
 
 
 /* =========================================================
- * BASE64
- * ========================================================= */
+   BASE64 → BYTES
+   ========================================================= */
 
 function base64ToBytes(
   input
 ) {
+
   let value =
     String(
       input || ""
     ).trim();
 
+
   /*
-   * Data URI
+   * DATA URI
    */
 
   if (
@@ -2381,21 +1960,27 @@ function base64ToBytes(
       "data:"
     )
   ) {
+
     const comma =
       value.indexOf(",");
+
 
     if (
       comma !== -1
     ) {
+
       value =
         value.substring(
           comma + 1
         );
+
     }
+
   }
 
+
   /*
-   * IMG HTML
+   * HTML IMG
    */
 
   const imgMatch =
@@ -2403,13 +1988,17 @@ function base64ToBytes(
       /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
     );
 
+
   if (
     imgMatch &&
     imgMatch[1]
   ) {
+
     value =
       imgMatch[1];
+
   }
+
 
   value =
     value.replace(
@@ -2417,124 +2006,155 @@ function base64ToBytes(
       ""
     );
 
-  if (
-    !value
-  ) {
+
+  if (!value) {
+
     throw new Error(
       "Base64 kosong."
     );
+
   }
+
 
   let binary;
 
+
   try {
+
     binary =
       atob(
         value
       );
+
   } catch (_) {
+
     throw new Error(
       "Base64 tidak valid."
     );
+
   }
+
 
   const bytes =
     new Uint8Array(
       binary.length
     );
 
+
   for (
     let i = 0;
     i < binary.length;
     i++
   ) {
+
     bytes[i] =
-      binary.charCodeAt(
-        i
-      );
+      binary.charCodeAt(i);
+
   }
 
+
   return bytes;
+
 }
 
+
+/* =========================================================
+   IMAGE BASE64
+   ========================================================= */
 
 function extractImageBase64(
   input
 ) {
+
   const value =
     String(
       input || ""
     ).trim();
+
 
   const match =
     value.match(
       /<img[^>]+src=["']data:image\/[^;]+;base64,([^"']+)["']/i
     );
 
+
   if (
     match &&
     match[1]
   ) {
+
     return match[1];
+
   }
 
+
   return value;
+
 }
 
 
 /* =========================================================
- * BYTES → BASE64
- * ========================================================= */
+   BYTES → BASE64
+   ========================================================= */
 
 function bytesToBase64(
   bytes
 ) {
-  let binary =
-    "";
+
+  let binary = "";
+
 
   const chunkSize =
     0x8000;
+
 
   for (
     let i = 0;
     i < bytes.length;
     i += chunkSize
   ) {
+
     binary +=
       String.fromCharCode(
         ...bytes.subarray(
           i,
           Math.min(
-            i +
-              chunkSize,
+            i + chunkSize,
             bytes.length
           )
         )
       );
+
   }
+
 
   return btoa(
     binary
   );
+
 }
 
 
 /* =========================================================
- * VALIDATE PDF
- * ========================================================= */
+   VALIDATE PDF
+   ========================================================= */
 
 function validatePdf(
   bytes,
   name
 ) {
+
   if (
     !bytes ||
     bytes.length < 5
   ) {
+
     throw new Error(
       `${name} kosong.`
     );
+
   }
+
 
   const header =
     new TextDecoder().decode(
@@ -2544,51 +2164,63 @@ function validatePdf(
       )
     );
 
+
   if (
     header !== "%PDF-"
   ) {
+
     throw new Error(
       `${name} bukan PDF valid.`
     );
+
   }
+
 }
 
 
 /* =========================================================
- * JPG
- * ========================================================= */
+   JPG
+   ========================================================= */
 
 function isJpg(
   bytes
 ) {
+
   return (
     bytes.length >= 3 &&
     bytes[0] === 0xff &&
     bytes[1] === 0xd8 &&
     bytes[2] === 0xff
   );
+
 }
 
 
 /* =========================================================
- * JSON
- * ========================================================= */
+   JSON RESPONSE
+   ========================================================= */
 
 function json(
   data,
   status = 200
 ) {
+
   return new Response(
     JSON.stringify(
       data
     ),
     {
+
       status,
 
       headers: {
+
         "Content-Type":
           "application/json; charset=utf-8"
+
       }
+
     }
   );
+
 }
