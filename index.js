@@ -449,7 +449,7 @@ export default {
               total,
               page
             ) =>
-              total +
+              total + 
               page.length,
             0
           ),
@@ -853,19 +853,6 @@ function parseProductLine(
 // =========================================================
 // BUILD MEDICINE TABLE
 // =========================================================
-//
-// INI SATU-SATUNYA BAGIAN YANG KITA PERBAIKI:
-//
-// REGULER:
-// No | Nama Obat | Satuan | Jumlah | Keterangan
-//
-// PREKURSOR:
-// No | Nama Obat | Satuan |
-// Zat Aktif Prekursor |
-// Bentuk dan Kekuatan Sediaan |
-// Jumlah | Keterangan
-//
-// =========================================================
 
 function buildMedicineTable(
   products,
@@ -953,6 +940,16 @@ function buildMedicineTable(
 
 
     // ===================================================
+    // JUMLAH + BILANGAN
+    // ===================================================
+
+    const jumlah =
+      formatJumlah(
+        product.qty
+      );
+
+
+    // ===================================================
     // REGULER
     // ===================================================
 
@@ -985,7 +982,7 @@ function buildMedicineTable(
 
           <td>
             ${escapeHtml(
-              product.qty
+              jumlah
             )}
           </td>
 
@@ -1042,7 +1039,7 @@ function buildMedicineTable(
 
           <td>
             ${escapeHtml(
-              product.qty
+              jumlah
             )}
           </td>
 
@@ -1140,6 +1137,250 @@ function buildMedicineTable(
     </table>
 
   `;
+}
+
+
+// =========================================================
+// ANGKA → BILANGAN INDONESIA
+// =========================================================
+
+function numberToIndonesianWords(
+  value
+) {
+
+  const number =
+    Number(
+      String(value ?? "")
+        .replace(/[^\d-]/g, "")
+    );
+
+
+  if (
+    !Number.isFinite(number)
+  ) {
+
+    return String(
+      value ?? ""
+    );
+  }
+
+
+  if (
+    number === 0
+  ) {
+
+    return "Nol";
+  }
+
+
+  const words = [
+
+    "",
+
+    "Satu",
+
+    "Dua",
+
+    "Tiga",
+
+    "Empat",
+
+    "Lima",
+
+    "Enam",
+
+    "Tujuh",
+
+    "Delapan",
+
+    "Sembilan",
+
+    "Sepuluh",
+
+    "Sebelas"
+
+  ];
+
+
+  function convert(n) {
+
+    if (
+      n < 12
+    ) {
+
+      return words[n];
+    }
+
+
+    if (
+      n < 20
+    ) {
+
+      return (
+        words[n - 10] +
+        " Belas"
+      );
+    }
+
+
+    if (
+      n < 100
+    ) {
+
+      return (
+        words[
+          Math.floor(
+            n / 10
+          )
+        ] +
+        " Puluh " +
+        convert(
+          n % 10
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 200
+    ) {
+
+      return (
+        "Seratus " +
+        convert(
+          n - 100
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 1000
+    ) {
+
+      return (
+        words[
+          Math.floor(
+            n / 100
+          )
+        ] +
+        " Ratus " +
+        convert(
+          n % 100
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 2000
+    ) {
+
+      return (
+        "Seribu " +
+        convert(
+          n - 1000
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 1000000
+    ) {
+
+      return (
+        convert(
+          Math.floor(
+            n / 1000
+          )
+        ) +
+        " Ribu " +
+        convert(
+          n % 1000
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 1000000000
+    ) {
+
+      return (
+        convert(
+          Math.floor(
+            n / 1000000
+          )
+        ) +
+        " Juta " +
+        convert(
+          n % 1000000
+        )
+      ).trim();
+    }
+
+
+    if (
+      n < 1000000000000
+    ) {
+
+      return (
+        convert(
+          Math.floor(
+            n / 1000000000
+          )
+        ) +
+        " Miliar " +
+        convert(
+          n % 1000000000
+        )
+      ).trim();
+    }
+
+
+    return String(n);
+  }
+
+
+  return convert(
+    number
+  )
+    .replace(
+      /\s+/g,
+      " "
+    )
+    .trim();
+}
+
+
+// =========================================================
+// JUMLAH DENGAN BILANGAN
+// =========================================================
+
+function formatJumlah(
+  value
+) {
+
+  const angka =
+    String(
+      value ?? ""
+    ).trim();
+
+
+  if (!angka) {
+
+    return "";
+  }
+
+
+  const bilangan =
+    numberToIndonesianWords(
+      angka
+    );
+
+
+  return `${angka} (${bilangan})`;
 }
 
 
