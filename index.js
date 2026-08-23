@@ -449,7 +449,7 @@ export default {
               total,
               page
             ) =>
-              total + 
+              total +
               page.length,
             0
           ),
@@ -940,12 +940,12 @@ function buildMedicineTable(
 
 
     // ===================================================
-    // JUMLAH + BILANGAN
+    // JUMLAH = CASE PACK + BILANGAN
     // ===================================================
 
     const jumlah =
       formatJumlah(
-        product.qty
+        product.casePack
       );
 
 
@@ -2034,4 +2034,4 @@ function response(
 
     }
   );
-}
+};
