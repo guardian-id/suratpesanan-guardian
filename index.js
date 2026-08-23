@@ -299,7 +299,6 @@ export default {
 
 
         // Hilangkan placeholder lainnya
-
         page =
           page.replace(
             /\{\{[^{}]+\}\}/g,
@@ -307,9 +306,8 @@ export default {
           );
 
 
-        // Setiap halaman menjadi
-        // halaman A4 sendiri
-
+        // Pastikan setiap halaman
+        // menjadi halaman A4 sendiri
         page =
           wrapPage(
             page
@@ -484,8 +482,8 @@ function detectTemplate(
       .toLowerCase();
 
 
-  // Kalau mengandung "prekursor"
-  // gunakan template Prekursor
+  // Hanya kalau mengandung prekursor
+  // dianggap Prekursor
 
   if (
     name.includes(
@@ -799,17 +797,6 @@ function parseProductLine(
     startMatch[3].trim();
 
 
-  /*
-    Dari belakang:
-
-    invoice
-    expired
-    batch
-    qty
-    case pack
-    kemasan
-  */
-
   const endMatch =
     rest.match(
       /^(.+?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
@@ -825,30 +812,39 @@ function parseProductLine(
   return {
 
     no:
+
       no,
 
     sku:
+
       sku,
 
     description:
+
       endMatch[1].trim(),
 
     kemasan:
+
       endMatch[2].trim(),
 
     casePack:
+
       endMatch[3].trim(),
 
     qty:
+
       endMatch[4].trim(),
 
     batch:
+
       endMatch[5].trim(),
 
     expiredDate:
+
       endMatch[6].trim(),
 
     invoice:
+
       endMatch[7].trim()
 
   };
@@ -886,68 +882,39 @@ function buildMedicineTable(
       "prekursor"
     ) {
 
-      /*
-        PERBAIKAN UTAMA:
-
-        Jangan hanya mencari row.SKU.
-
-        Master CSV bisa mempunyai header:
-        ProductSKU
-        Product SKU
-        productsku
-        product_sku
-        SKU
-        sku
-      */
-
       const master =
-        masterPrekursor.find(
-          row =>
-            normalizeSku(
-              getMasterValue(
-                row,
-                [
-                  "ProductSKU",
-                  "Product SKU",
-                  "productsku",
-                  "product_sku",
-                  "SKU",
-                  "sku"
-                ]
-              )
-            ) ===
-            normalizeSku(
-              product.sku
-            )
+        findPrekursorBySku(
+          masterPrekursor,
+          product.sku
         );
 
 
       if (master) {
 
-        /*
-          Header Zat Aktif
-        */
-
         zatAktif =
           getMasterValue(
             master,
             [
-              "ZatAktif",
+              "Zat Aktif Prekursor",
+              "ZatAktifPrekursor",
+              "ZAT AKTIF PREKURSOR",
+              "zat_aktif_prekursor",
               "Zat Aktif",
+              "ZatAktif",
               "ZAT AKTIF",
               "zat_aktif"
             ]
           );
 
 
-        /*
-          Header Bentuk
-        */
-
         bentuk =
           getMasterValue(
             master,
             [
+              "Bentuk dan Kekuatan Sediaan",
+              "BentukDanKekuatanSediaan",
+              "BENTUK DAN KEKUATAN SEDIAAN",
+              "bentuk_dan_kekuatan_sediaan",
               "Bentuk",
               "BENTUK",
               "bentuk"
@@ -967,156 +934,55 @@ function buildMedicineTable(
       );
 
 
-    // ===================================================
-    // REGULER
-    // ===================================================
+    rows += `
 
-    if (
-      templateName ===
-      "reguler"
-    ) {
+      <tr>
 
-      rows += `
+        <td>
+          ${escapeHtml(
+            product.no
+          )}
+        </td>
 
-        <tr>
+        <td>
+          ${escapeHtml(
+            product.description
+          )}
+        </td>
 
-          <td>
-            ${escapeHtml(
-              product.no
-            )}
-          </td>
+        <td>
+          ${escapeHtml(
+            product.kemasan
+          )}
+        </td>
 
-          <td>
-            ${escapeHtml(
-              product.description
-            )}
-          </td>
+        <td>
+          ${escapeHtml(
+            zatAktif
+          )}
+        </td>
 
-          <td>
-            ${escapeHtml(
-              product.kemasan
-            )}
-          </td>
+        <td>
+          ${escapeHtml(
+            bentuk
+          )}
+        </td>
 
-          <td>
-            ${escapeHtml(
-              product.qty
-            )}
-          </td>
+        <td>
+          ${escapeHtml(
+            product.qty
+          )}
+        </td>
 
-          <td>
-            ${keterangan}
-          </td>
+        <td>
+          ${keterangan}
+        </td>
 
-        </tr>
-
-      `;
-    }
-
-
-    // ===================================================
-    // PREKURSOR
-    // ===================================================
-
-    else {
-
-      rows += `
-
-        <tr>
-
-          <td>
-            ${escapeHtml(
-              product.no
-            )}
-          </td>
-
-          <td>
-            ${escapeHtml(
-              product.description
-            )}
-          </td>
-
-          <td>
-            ${escapeHtml(
-              product.kemasan
-            )}
-          </td>
-
-          <td>
-            ${escapeHtml(
-              zatAktif
-            )}
-          </td>
-
-          <td>
-            ${escapeHtml(
-              bentuk
-            )}
-          </td>
-
-          <td>
-            ${escapeHtml(
-              product.qty
-            )}
-          </td>
-
-          <td>
-            ${keterangan}
-          </td>
-
-        </tr>
-
-      `;
-    }
-  }
-
-
-  // =====================================================
-  // REGULER TABLE
-  // =====================================================
-
-  if (
-    templateName ===
-    "reguler"
-  ) {
-
-    return `
-
-      <table class="medicine-table">
-
-        <thead>
-
-          <tr>
-
-            <th>No</th>
-
-            <th>Nama Obat</th>
-
-            <th>Satuan</th>
-
-            <th>Jumlah</th>
-
-            <th>Keterangan</th>
-
-          </tr>
-
-        </thead>
-
-        <tbody>
-
-          ${rows}
-
-        </tbody>
-
-      </table>
+      </tr>
 
     `;
   }
 
-
-  // =====================================================
-  // PREKURSOR TABLE
-  // =====================================================
 
   return `
 
@@ -1214,12 +1080,22 @@ function parseCsv(
   }
 
 
+  // =====================================================
+  // HEADER CSV
+  // Bersihkan BOM dari header pertama
+  // =====================================================
+
   const headers =
     parseCsvLine(
       lines[0]
     ).map(
       header =>
-        header.trim()
+        String(header)
+          .replace(
+            /^\uFEFF/,
+            ""
+          )
+          .trim()
     );
 
 
@@ -1338,6 +1214,146 @@ function parseCsvLine(
 
 
 // =========================================================
+// FIND PREKURSOR BY SKU
+// =========================================================
+
+function findPrekursorBySku(
+  master,
+  sku
+) {
+
+  const targetSku =
+    normalizeSku(
+      sku
+    );
+
+
+  if (!targetSku) {
+
+    return null;
+  }
+
+
+  for (
+    const row of master
+  ) {
+
+    const csvSku =
+      getSkuFromMaster(
+        row
+      );
+
+
+    if (
+      csvSku &&
+      normalizeSku(
+        csvSku
+      ) === targetSku
+    ) {
+
+      return row;
+    }
+  }
+
+
+  return null;
+}
+
+
+// =========================================================
+// GET SKU FROM MASTER CSV
+// Mendukung berbagai nama header SKU
+// =========================================================
+
+function getSkuFromMaster(
+  row
+) {
+
+  const possibleNames = [
+
+    "SKU",
+    "sku",
+    "Sku",
+
+    "Product SKU",
+    "PRODUCT SKU",
+    "product sku",
+
+    "ProductSKU",
+    "PRODUCTSKU",
+    "productsku",
+
+    "Product_Sku",
+    "product_sku",
+
+    "Product-SKU",
+    "PRODUCT-SKU"
+
+  ];
+
+
+  // =====================================================
+  // CEK NAMA HEADER YANG UMUM
+  // =====================================================
+
+  for (
+    const name of possibleNames
+  ) {
+
+    if (
+      row[name] !== undefined &&
+      row[name] !== null &&
+      String(
+        row[name]
+      ).trim() !== ""
+    ) {
+
+      return String(
+        row[name]
+      ).trim();
+    }
+  }
+
+
+  // =====================================================
+  // FALLBACK
+  // Normalisasi nama header
+  // =====================================================
+
+  for (
+    const key of Object.keys(row)
+  ) {
+
+    const normalizedKey =
+      String(key)
+        .replace(
+          /^\uFEFF/,
+          ""
+        )
+        .replace(
+          /[\s_\-]/g,
+          ""
+        )
+        .toLowerCase();
+
+
+    if (
+      normalizedKey === "sku" ||
+      normalizedKey === "productsku"
+    ) {
+
+      return String(
+        row[key] ?? ""
+      ).trim();
+    }
+  }
+
+
+  return "";
+}
+
+
+// =========================================================
 // SKU NORMALIZER
 // =========================================================
 
@@ -1348,9 +1364,21 @@ function normalizeSku(
   return String(
     value ?? ""
   )
+    .replace(
+      /^\uFEFF/,
+      ""
+    )
     .trim()
     .replace(
+      /^["']|["']$/g,
+      ""
+    )
+    .replace(
       /\.0$/,
+      ""
+    )
+    .replace(
+      /\s+/g,
       ""
     );
 }
@@ -1377,6 +1405,53 @@ function getMasterValue(
 
       return String(
         row[name] ??
+        ""
+      ).trim();
+    }
+  }
+
+
+  // =====================================================
+  // FALLBACK HEADER NORMALIZATION
+  // =====================================================
+
+  const normalizedTargets =
+    possibleNames.map(
+      name =>
+        String(name)
+          .replace(
+            /[\s_\-]/g,
+            ""
+          )
+          .toLowerCase()
+    );
+
+
+  for (
+    const key of Object.keys(row)
+  ) {
+
+    const normalizedKey =
+      String(key)
+        .replace(
+          /^\uFEFF/,
+          ""
+        )
+        .replace(
+          /[\s_\-]/g,
+          ""
+        )
+        .toLowerCase();
+
+
+    if (
+      normalizedTargets.includes(
+        normalizedKey
+      )
+    ) {
+
+      return String(
+        row[key] ??
         ""
       ).trim();
     }
