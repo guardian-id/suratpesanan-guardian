@@ -44,6 +44,12 @@ export default {
 
       // =====================================================
       // TEMPLATE
+      //
+      // REGULER
+      // → Reguler.html
+      //
+      // PREKURSOR
+      // → Prekursor.html
       // =====================================================
 
       const templateName =
@@ -71,7 +77,7 @@ export default {
 
 
       // =====================================================
-      // AMBIL TEMPLATE HTML DARI GITHUB
+      // AMBIL TEMPLATE HTML
       // =====================================================
 
       const templateResponse =
@@ -298,12 +304,17 @@ export default {
             );
 
 
+        // Hilangkan placeholder lainnya
+
         page =
           page.replace(
             /\{\{[^{}]+\}\}/g,
             ""
           );
 
+
+        // Pastikan setiap halaman
+        // menjadi halaman A4 sendiri
 
         page =
           wrapPage(
@@ -466,58 +477,43 @@ export default {
 // =========================================================
 // DETECT TEMPLATE
 // =========================================================
-//
-// PENTING:
-// "Reguler"        → reguler
-// "Reguler.pdf"   → reguler
-// "reguler"       → reguler
-//
-// "Prekursor"     → prekursor
-// "Prekursor.pdf" → prekursor
-//
-// Kalau kosong / tidak dikenal → REGULER
-// =========================================================
 
-function detectTemplate(
-  value
-) {
+function detectTemplate(value) {
 
-  let name =
+  const name =
     String(
-      value ?? "Reguler"
+      value ?? ""
     )
       .trim()
       .toLowerCase();
 
+  // =====================================================
+  // HANYA NILAI YANG BENAR-BENAR PREKURSOR
+  // YANG BOLEH MEMILIH PREKURSOR
+  // =====================================================
 
-  // Hapus extension .pdf
-  name =
-    name.replace(
-      /\.pdf$/i,
-      ""
-    )
-    .trim();
-
-
-  // EXACT MATCH REGULER
   if (
-    name === "reguler"
-  ) {
-
-    return "reguler";
-  }
-
-
-  // EXACT MATCH PREKURSOR
-  if (
-    name === "prekursor"
+    name === "prekursor" ||
+    name === "prekursor.pdf"
   ) {
 
     return "prekursor";
   }
 
 
-  // Fallback aman
+  // =====================================================
+  // SEMUA NILAI LAIN
+  // TERMASUK:
+  //
+  // Reguler
+  // reguler
+  // REGULER
+  // Reguler.pdf
+  // kosong
+  //
+  // → REGULER
+  // =====================================================
+
   return "reguler";
 }
 
@@ -875,68 +871,14 @@ function buildMedicineTable(
     const product of products
   ) {
 
-    let zatAktif = "";
-
-    let bentuk = "";
-
-
-    // ===================================================
-    // HANYA PREKURSOR → LOOKUP MASTER
-    // ===================================================
-
-    if (
-      templateName ===
-      "prekursor"
-    ) {
-
-      const master =
-        masterPrekursor.find(
-          row =>
-            normalizeSku(
-              row.SKU
-            ) ===
-            normalizeSku(
-              product.sku
-            )
-        );
-
-
-      if (master) {
-
-        zatAktif =
-          getMasterValue(
-            master,
-            [
-              "Zat Aktif",
-              "ZatAktif",
-              "ZAT AKTIF",
-              "zat_aktif"
-            ]
-          );
-
-
-        bentuk =
-          getMasterValue(
-            master,
-            [
-              "Bentuk",
-              "BENTUK",
-              "bentuk"
-            ]
-          );
-      }
-    }
-
-
-    const keterangan =
-      escapeHtml(
-        product.invoice
-      );
-
-
     // ===================================================
     // REGULER
-    // 5 KOLOM
+    //
+    // No
+    // Nama Obat
+    // Satuan
+    // Jumlah
+    // Keterangan
     // ===================================================
 
     if (
@@ -973,76 +915,129 @@ function buildMedicineTable(
           </td>
 
           <td>
-            ${keterangan}
+            ${escapeHtml(
+              product.invoice
+            )}
           </td>
 
         </tr>
 
       `;
 
+      continue;
     }
+
 
     // ===================================================
     // PREKURSOR
-    // 7 KOLOM
+    //
+    // No
+    // Nama Obat
+    // Satuan
+    // Zat Aktif
+    // Bentuk
+    // Jumlah
+    // Keterangan
     // ===================================================
 
-    else {
+    let zatAktif = "";
 
-      rows += `
+    let bentuk = "";
 
-        <tr>
 
-          <td>
-            ${escapeHtml(
-              product.no
-            )}
-          </td>
+    const master =
+      masterPrekursor.find(
+        row =>
+          normalizeSku(
+            row.SKU
+          ) ===
+          normalizeSku(
+            product.sku
+          )
+      );
 
-          <td>
-            ${escapeHtml(
-              product.description
-            )}
-          </td>
 
-          <td>
-            ${escapeHtml(
-              product.kemasan
-            )}
-          </td>
+    if (master) {
 
-          <td>
-            ${escapeHtml(
-              zatAktif
-            )}
-          </td>
+      zatAktif =
+        getMasterValue(
+          master,
+          [
+            "Zat Aktif",
+            "ZatAktif",
+            "ZAT AKTIF",
+            "zat_aktif"
+          ]
+        );
 
-          <td>
-            ${escapeHtml(
-              bentuk
-            )}
-          </td>
 
-          <td>
-            ${escapeHtml(
-              product.qty
-            )}
-          </td>
-
-          <td>
-            ${keterangan}
-          </td>
-
-        </tr>
-
-      `;
+      bentuk =
+        getMasterValue(
+          master,
+          [
+            "Bentuk",
+            "BENTUK",
+            "bentuk"
+          ]
+        );
     }
+
+
+    rows += `
+
+      <tr>
+
+        <td>
+          ${escapeHtml(
+            product.no
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.description
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.kemasan
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            zatAktif
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            bentuk
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.qty
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.invoice
+          )}
+        </td>
+
+      </tr>
+
+    `;
   }
 
 
-  // ===================================================
-  // HEADER REGULER
-  // ===================================================
+  // =====================================================
+  // HEADER TABLE
+  // =====================================================
 
   if (
     templateName ===
@@ -1082,10 +1077,6 @@ function buildMedicineTable(
     `;
   }
 
-
-  // ===================================================
-  // HEADER PREKURSOR
-  // ===================================================
 
   return `
 
@@ -1589,7 +1580,11 @@ function addPdfCss(
       }
 
 
-      .medicine-table {
+      /* ===============================================
+         REGULER
+         =============================================== */
+
+      .reguler-table {
 
         width: 100%;
 
@@ -1600,20 +1595,16 @@ function addPdfCss(
       }
 
 
-      /* ============================
-         REGULER
-         ============================ */
-
       .reguler-table th:nth-child(1) {
 
-        width: 7%;
+        width: 6%;
 
       }
 
 
       .reguler-table th:nth-child(2) {
 
-        width: 48%;
+        width: 45%;
 
       }
 
@@ -1634,14 +1625,25 @@ function addPdfCss(
 
       .reguler-table th:nth-child(5) {
 
-        width: 20%;
+        width: 24%;
 
       }
 
 
-      /* ============================
+      /* ===============================================
          PREKURSOR
-         ============================ */
+         =============================================== */
+
+      .prekursor-table {
+
+        width: 100%;
+
+        table-layout: fixed;
+
+        font-size: 9px;
+
+      }
+
 
       .prekursor-table th:nth-child(1) {
 
@@ -1691,6 +1693,10 @@ function addPdfCss(
 
       }
 
+
+      /* ===============================================
+         TTD + STEMPEL
+         =============================================== */
 
       .signature-container {
 
