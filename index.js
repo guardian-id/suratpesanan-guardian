@@ -1,13 +1,18 @@
+import { getDocument } from "pdfjs-serverless";
+
 const GITHUB_BASE =
   "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main";
 
 const TEMPLATE = {
   reguler:
-    "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Reguler.html",
+    GITHUB_BASE + "/Reguler.html",
 
   prekursor:
-    "https://raw.githubusercontent.com/guardian-id/suratpesanan-guardian/main/Prekursor.html"
+    GITHUB_BASE + "/Prekursor.html"
 };
+
+const MASTER_PREKURSOR_URL =
+  GITHUB_BASE + "/master_prekursor.csv";
 
 
 export default {
@@ -26,12 +31,11 @@ export default {
           success: false,
           message: "Gunakan method POST."
         }, 405);
-
       }
 
 
       // =====================================================
-      // JSON BODY
+      // JSON
       // =====================================================
 
       const body =
@@ -40,63 +44,61 @@ export default {
 
       // =====================================================
       // TEMPLATE
+      //
+      // Reguler:
+      // Reguler
+      // Reguler.pdf
+      // reguler
+      //
+      // Prekursor:
+      // Prekursor
+      // Prekursor.pdf
       // =====================================================
 
-      const templateInput =
-        String(body.template || "Reguler")
-          .trim()
-          .toLowerCase();
-
-
-      let templateName;
-      let templateUrl;
-
-
-      if (templateInput === "reguler") {
-
-        templateName = "Reguler";
-
-        templateUrl = TEMPLATE.reguler;
-
-      }
-
-      else if (templateInput === "prekursor") {
-
-        templateName = "Prekursor";
-
-        templateUrl = TEMPLATE.prekursor;
-
-      }
-
-      else {
-
-        throw new Error(
-          `Template tidak valid: ${body.template}`
+      const templateName =
+        detectTemplate(
+          body.template
         );
 
+
+      // =====================================================
+      // PDF SOURCE
+      // =====================================================
+
+      const pdfBase64 =
+        String(
+          body.pdfBase64 || ""
+        ).trim();
+
+
+      if (!pdfBase64) {
+
+        throw new Error(
+          "pdfBase64 tidak ditemukan."
+        );
       }
 
 
       // =====================================================
-      // AMBIL TEMPLATE HTML DARI GITHUB
+      // AMBIL TEMPLATE HTML
       // =====================================================
 
       const templateResponse =
         await fetch(
-          templateUrl
+          TEMPLATE[templateName]
         );
 
 
       if (!templateResponse.ok) {
 
         throw new Error(
-          `Template GitHub gagal diambil. HTTP ${templateResponse.status}`
+          "Template GitHub gagal diambil. HTTP " +
+          templateResponse.status
         );
-
       }
 
 
-      let html =
+      const templateHtml =
         await templateResponse.text();
 
 
@@ -122,6 +124,10 @@ export default {
       ];
 
 
+      let baseHtml =
+        templateHtml;
+
+
       for (
         const field of fields
       ) {
@@ -130,8 +136,8 @@ export default {
           body[field] ?? "";
 
 
-        html =
-          html
+        baseHtml =
+          baseHtml
             .split(
               `{{${field}}}`
             )
@@ -140,69 +146,7 @@ export default {
                 String(value)
               )
             );
-
       }
-
-
-      // =====================================================
-      // TABLE PDF
-      //
-      // SEMENTARA DIABAIKAN
-      // =====================================================
-
-      let tableHtml =
-        body.TablePDF || "";
-
-
-      if (!tableHtml) {
-
-        tableHtml = `
-
-          <table class="medicine-table">
-
-            <thead>
-
-              <tr>
-
-                <th>No</th>
-                <th>Nama Obat</th>
-                <th>Satuan</th>
-                <th>Zat Aktif</th>
-                <th>Bentuk</th>
-                <th>Jumlah</th>
-                <th>Keterangan</th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              <tr>
-
-                <td colspan="7">
-                  Tidak ada data tabel.
-                </td>
-
-              </tr>
-
-            </tbody>
-
-          </table>
-
-        `;
-
-      }
-
-
-      html =
-        html
-          .split(
-            "{{TablePDF}}"
-          )
-          .join(
-            tableHtml
-          );
 
 
       // =====================================================
@@ -237,12 +181,10 @@ export default {
             ${
               stamp
                 ? `
-
                   <img
                     src="${stamp}"
                     class="stamp"
                   >
-
                 `
                 : ""
             }
@@ -250,12 +192,10 @@ export default {
             ${
               ttd
                 ? `
-
                   <img
                     src="${ttd}"
                     class="signature"
                   >
-
                 `
                 : ""
             }
@@ -263,12 +203,11 @@ export default {
           </div>
 
         `;
-
       }
 
 
-      html =
-        html
+      baseHtml =
+        baseHtml
           .split(
             "{{TTD&Stemp}}"
           )
@@ -278,18 +217,131 @@ export default {
 
 
       // =====================================================
-      // HAPUS PLACEHOLDER YANG TERSISA
+      // PDF SOURCE → TEXT
       // =====================================================
 
-      html =
-        html.replace(
-          /\{\{[^{}]+\}\}/g,
-          ""
+      const pdfBytes =
+        base64ToUint8Array(
+          pdfBase64
+        );
+
+
+      const pdfData =
+        await extractPdfText(
+          pdfBytes
         );
 
 
       // =====================================================
-      // TAMBAHKAN CSS PDF
+      // MASTER PREKURSOR
+      // =====================================================
+
+      let masterPrekursor =
+        [];
+
+
+      if (
+        templateName ===
+        "prekursor"
+      ) {
+
+        masterPrekursor =
+          await loadPrekursorMaster();
+      }
+
+
+      // =====================================================
+      // PARSE PRODUCT PER HALAMAN
+      // =====================================================
+
+      const pageProducts =
+        parseProductsByPage(
+          pdfData
+        );
+
+
+      if (
+        !pageProducts.length
+      ) {
+
+        throw new Error(
+          "Tidak ditemukan data produk pada PDF sumber."
+        );
+      }
+
+
+      // =====================================================
+      // BUAT HTML UNTUK SETIAP HALAMAN
+      //
+      // PDF sumber 6 halaman
+      // → template 6 halaman
+      // =====================================================
+
+      const pageHtml = [];
+
+
+      for (
+        let pageIndex = 0;
+        pageIndex < pageProducts.length;
+        pageIndex++
+      ) {
+
+        const products =
+          pageProducts[
+            pageIndex
+          ];
+
+
+        const tableHtml =
+          buildMedicineTable(
+            products,
+            templateName,
+            masterPrekursor
+          );
+
+
+        let page =
+          baseHtml
+            .split(
+              "{{TablePDF}}"
+            )
+            .join(
+              tableHtml
+            );
+
+
+        // Hilangkan placeholder lainnya
+        page =
+          page.replace(
+            /\{\{[^{}]+\}\}/g,
+            ""
+          );
+
+
+        // Pastikan setiap halaman
+        // menjadi halaman A4 sendiri
+        page =
+          wrapPage(
+            page
+          );
+
+
+        pageHtml.push(
+          page
+        );
+      }
+
+
+      // =====================================================
+      // GABUNG SEMUA HALAMAN
+      // =====================================================
+
+      let html =
+        pageHtml.join("\n");
+
+
+      // =====================================================
+      // CSS PDF
       // =====================================================
 
       html =
@@ -299,7 +351,7 @@ export default {
 
 
       // =====================================================
-      // BROWSER CHECK
+      // BROWSER
       // =====================================================
 
       if (!env.BROWSER) {
@@ -307,7 +359,6 @@ export default {
         throw new Error(
           "Binding BROWSER belum tersedia di Cloudflare Worker."
         );
-
       }
 
 
@@ -324,28 +375,18 @@ export default {
 
             pdfOptions: {
 
-              format:
-                "a4",
+              format: "a4",
 
-              printBackground:
-                true,
+              printBackground: true,
 
-              preferCSSPageSize:
-                true,
+              preferCSSPageSize: true,
 
               margin: {
 
-                top:
-                  "0",
-
-                right:
-                  "0",
-
-                bottom:
-                  "0",
-
-                left:
-                  "0"
+                top: "0",
+                right: "0",
+                bottom: "0",
+                left: "0"
 
               }
 
@@ -362,17 +403,17 @@ export default {
 
 
         throw new Error(
-          `HTML → PDF gagal: ${error}`
+          "HTML → PDF gagal: " +
+          error
         );
-
       }
 
 
       // =====================================================
-      // PDF BINARY → BASE64
+      // PDF → BASE64
       // =====================================================
 
-      const pdfBytes =
+      const finalPdfBytes =
         new Uint8Array(
           await pdf.arrayBuffer()
         );
@@ -380,7 +421,7 @@ export default {
 
       const spBase64 =
         bytesToBase64(
-          pdfBytes
+          finalPdfBytes
         );
 
 
@@ -390,14 +431,30 @@ export default {
 
       return response({
 
-        success:
-          true,
+        success: true,
 
         message:
-          "HTML berhasil dikonversi menjadi PDF.",
+          "PDF berhasil dibuat.",
 
         template:
-          templateName,
+          templateName ===
+          "prekursor"
+            ? "Prekursor"
+            : "Reguler",
+
+        sourcePageCount:
+          pageProducts.length,
+
+        productCount:
+          pageProducts.reduce(
+            (
+              total,
+              page
+            ) =>
+              total +
+              page.length,
+            0
+          ),
 
         spBase64:
           spBase64
@@ -405,257 +462,823 @@ export default {
       });
 
 
-    }
-
-    catch (error) {
+    } catch (error) {
 
       return response({
 
-        success:
-          false,
+        success: false,
 
         message:
           error?.message ||
           "Terjadi error."
 
       }, 500);
-
     }
-
   }
-
 };
 
 
 // =========================================================
-// TAMBAHKAN CSS PDF
+// DETECT TEMPLATE
 // =========================================================
 
-function addPdfCss(
+function detectTemplate(
+  value
+) {
+
+  const name =
+    String(
+      value || "Reguler"
+    )
+      .trim()
+      .toLowerCase();
+
+
+  // Hanya kalau mengandung prekursor
+  // dianggap Prekursor
+
+  if (
+    name.includes(
+      "prekursor"
+    )
+  ) {
+
+    return "prekursor";
+  }
+
+
+  // Selain itu Reguler
+
+  return "reguler";
+}
+
+
+// =========================================================
+// WRAP PAGE
+// =========================================================
+
+function wrapPage(
   html
 ) {
 
-  const css = `
+  return `
 
-    <style>
+    <div class="pdf-page">
 
-      @page {
+      ${html}
 
-        size:
-          A4 portrait;
-
-        margin:
-          0;
-
-      }
-
-
-      html,
-      body {
-
-        width:
-          210mm;
-
-        min-height:
-          297mm;
-
-        margin:
-          0;
-
-        padding:
-          0;
-
-      }
-
-
-      .a4-container {
-
-        width:
-          210mm;
-
-        min-height:
-          297mm;
-
-        box-sizing:
-          border-box;
-
-        page-break-after:
-          always;
-
-      }
-
-
-      table {
-
-        width:
-          100%;
-
-        border-collapse:
-          collapse;
-
-      }
-
-
-      table th,
-      table td {
-
-        border:
-          1px solid #000;
-
-        padding:
-          4px;
-
-        vertical-align:
-          top;
-
-      }
-
-
-      .medicine-table {
-
-        width:
-          100%;
-
-        table-layout:
-          fixed;
-
-        font-size:
-          9px;
-
-      }
-
-
-      .medicine-table th:nth-child(1) {
-
-        width:
-          6%;
-
-      }
-
-
-      .medicine-table th:nth-child(2) {
-
-        width:
-          25%;
-
-      }
-
-
-      .medicine-table th:nth-child(3) {
-
-        width:
-          10%;
-
-      }
-
-
-      .medicine-table th:nth-child(4) {
-
-        width:
-          19%;
-
-      }
-
-
-      .medicine-table th:nth-child(5) {
-
-        width:
-          12%;
-
-      }
-
-
-      .medicine-table th:nth-child(6) {
-
-        width:
-          8%;
-
-      }
-
-
-      .medicine-table th:nth-child(7) {
-
-        width:
-          20%;
-
-      }
-
-
-      .signature-container {
-
-        position:
-          relative;
-
-        width:
-          150px;
-
-        height:
-          100px;
-
-      }
-
-
-      .signature-container .stamp {
-
-        position:
-          absolute;
-
-        left:
-          40px;
-
-        top:
-          15px;
-
-        width:
-          85px;
-
-        height:
-          85px;
-
-        object-fit:
-          contain;
-
-        z-index:
-          1;
-
-      }
-
-
-      .signature-container .signature {
-
-        position:
-          absolute;
-
-        left:
-          0;
-
-        top:
-          0;
-
-        width:
-          105px;
-
-        height:
-          60px;
-
-        object-fit:
-          contain;
-
-        z-index:
-          2;
-
-      }
-
-    </style>
+    </div>
 
   `;
+}
 
 
-  return html.replace(
-    "</head>",
-    `${css}</head>`
+// =========================================================
+// PDF TEXT EXTRACTION
+// =========================================================
+
+async function extractPdfText(
+  pdfBytes
+) {
+
+  const loadingTask =
+    getDocument({
+
+      data: pdfBytes,
+
+      useSystemFonts: true
+
+    });
+
+
+  const document =
+    await loadingTask.promise;
+
+
+  const pages = [];
+
+
+  for (
+    let pageNumber = 1;
+    pageNumber <=
+    document.numPages;
+    pageNumber++
+  ) {
+
+    const page =
+      await document.getPage(
+        pageNumber
+      );
+
+
+    const textContent =
+      await page.getTextContent();
+
+
+    const items =
+      textContent.items
+        .filter(
+          item =>
+            typeof item.str ===
+              "string" &&
+            item.str.trim() !== ""
+        )
+        .map(
+          item => ({
+
+            text:
+              item.str.trim(),
+
+            x:
+              item.transform
+                ? item.transform[4]
+                : 0,
+
+            y:
+              item.transform
+                ? item.transform[5]
+                : 0
+
+          })
+        );
+
+
+    const lines =
+      groupTextItemsIntoLines(
+        items
+      );
+
+
+    pages.push({
+
+      pageNumber,
+
+      lines
+
+    });
+  }
+
+
+  return {
+
+    pageCount:
+      document.numPages,
+
+    pages
+
+  };
+}
+
+
+// =========================================================
+// GROUP TEXT INTO LINES
+// =========================================================
+
+function groupTextItemsIntoLines(
+  items
+) {
+
+  const groups = [];
+
+  const tolerance = 3;
+
+
+  for (
+    const item of items
+  ) {
+
+    let group =
+      groups.find(
+        g =>
+          Math.abs(
+            g.y -
+            item.y
+          ) <= tolerance
+      );
+
+
+    if (!group) {
+
+      group = {
+
+        y:
+          item.y,
+
+        items: []
+
+      };
+
+
+      groups.push(
+        group
+      );
+    }
+
+
+    group.items.push(
+      item
+    );
+  }
+
+
+  groups.sort(
+    (a, b) =>
+      b.y - a.y
   );
 
+
+  return groups.map(
+    group => {
+
+      group.items.sort(
+        (a, b) =>
+          a.x - b.x
+      );
+
+
+      return group.items
+        .map(
+          item =>
+            item.text
+        )
+        .join(" ")
+        .replace(
+          /\s+/g,
+          " "
+        )
+        .trim();
+
+    }
+  );
+}
+
+
+// =========================================================
+// PARSE PRODUCTS PER PAGE
+// =========================================================
+
+function parseProductsByPage(
+  pdfData
+) {
+
+  const result = [];
+
+
+  for (
+    const page of pdfData.pages
+  ) {
+
+    const products = [];
+
+
+    for (
+      const line of page.lines
+    ) {
+
+      const product =
+        parseProductLine(
+          line
+        );
+
+
+      if (product) {
+
+        products.push(
+          product
+        );
+      }
+    }
+
+
+    /*
+      Hanya halaman yang memiliki
+      data produk yang dimasukkan.
+    */
+
+    if (
+      products.length > 0
+    ) {
+
+      result.push(
+        products
+      );
+    }
+  }
+
+
+  return result;
+}
+
+
+// =========================================================
+// PARSE PRODUCT LINE
+// =========================================================
+
+function parseProductLine(
+  line
+) {
+
+  const text =
+    String(line)
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
+
+
+  /*
+    Contoh:
+
+    1 3102695
+    ACETYLSISTEINE...
+    BOX 20 2 EIK113
+    2027-11-01 58216245
+  */
+
+  const startMatch =
+    text.match(
+      /^(\d+)\s+(\d{5,})\s+(.+)$/
+    );
+
+
+  if (!startMatch) {
+
+    return null;
+  }
+
+
+  const no =
+    startMatch[1];
+
+  const sku =
+    startMatch[2];
+
+  const rest =
+    startMatch[3].trim();
+
+
+  /*
+    Dari belakang:
+
+    invoice
+    expired
+    batch
+    qty
+    case pack
+    kemasan
+  */
+
+  const endMatch =
+    rest.match(
+      /^(.+?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
+    );
+
+
+  if (!endMatch) {
+
+    return null;
+  }
+
+
+  return {
+
+    no:
+
+      no,
+
+    sku:
+
+      sku,
+
+    description:
+
+      endMatch[1].trim(),
+
+    kemasan:
+
+      endMatch[2].trim(),
+
+    casePack:
+
+      endMatch[3].trim(),
+
+    qty:
+
+      endMatch[4].trim(),
+
+    batch:
+
+      endMatch[5].trim(),
+
+    expiredDate:
+
+      endMatch[6].trim(),
+
+    invoice:
+
+      endMatch[7].trim()
+
+  };
+}
+
+
+// =========================================================
+// BUILD MEDICINE TABLE
+// =========================================================
+
+function buildMedicineTable(
+  products,
+  templateName,
+  masterPrekursor
+) {
+
+  let rows = "";
+
+
+  for (
+    const product of products
+  ) {
+
+    let zatAktif = "";
+
+    let bentuk = "";
+
+
+    // ===================================================
+    // PREKURSOR LOOKUP
+    // ===================================================
+
+    if (
+      templateName ===
+      "prekursor"
+    ) {
+
+      const master =
+        masterPrekursor.find(
+          row =>
+            normalizeSku(
+              row.SKU
+            ) ===
+            normalizeSku(
+              product.sku
+            )
+        );
+
+
+      if (master) {
+
+        zatAktif =
+          getMasterValue(
+            master,
+            [
+              "Zat Aktif",
+              "ZatAktif",
+              "ZAT AKTIF",
+              "zat_aktif"
+            ]
+          );
+
+
+        bentuk =
+          getMasterValue(
+            master,
+            [
+              "Bentuk",
+              "BENTUK",
+              "bentuk"
+            ]
+          );
+      }
+    }
+
+
+    /*
+      KETERANGAN SEKARANG HANYA INVOICE
+    */
+
+    const keterangan =
+      escapeHtml(
+        product.invoice
+      );
+
+
+    rows += `
+
+      <tr>
+
+        <td>
+          ${escapeHtml(
+            product.no
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.description
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.kemasan
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            zatAktif
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            bentuk
+          )}
+        </td>
+
+        <td>
+          ${escapeHtml(
+            product.qty
+          )}
+        </td>
+
+        <td>
+          ${keterangan}
+        </td>
+
+      </tr>
+
+    `;
+  }
+
+
+  return `
+
+    <table class="medicine-table">
+
+      <thead>
+
+        <tr>
+
+          <th>No</th>
+
+          <th>Nama Obat</th>
+
+          <th>Satuan</th>
+
+          <th>Zat Aktif</th>
+
+          <th>Bentuk</th>
+
+          <th>Jumlah</th>
+
+          <th>Keterangan</th>
+
+        </tr>
+
+      </thead>
+
+      <tbody>
+
+        ${rows}
+
+      </tbody>
+
+    </table>
+
+  `;
+}
+
+
+// =========================================================
+// MASTER PREKURSOR
+// =========================================================
+
+async function loadPrekursorMaster() {
+
+  const response =
+    await fetch(
+      MASTER_PREKURSOR_URL
+    );
+
+
+  if (!response.ok) {
+
+    throw new Error(
+      "master_prekursor.csv gagal diambil. HTTP " +
+      response.status
+    );
+  }
+
+
+  const csv =
+    await response.text();
+
+
+  return parseCsv(
+    csv
+  );
+}
+
+
+// =========================================================
+// CSV PARSER
+// =========================================================
+
+function parseCsv(
+  csv
+) {
+
+  const lines =
+    String(csv)
+      .split(
+        /\r?\n/
+      )
+      .filter(
+        line =>
+          line.trim() !== ""
+      );
+
+
+  if (
+    lines.length < 2
+  ) {
+
+    return [];
+  }
+
+
+  const headers =
+    parseCsvLine(
+      lines[0]
+    ).map(
+      header =>
+        header.trim()
+    );
+
+
+  const result = [];
+
+
+  for (
+    let i = 1;
+    i < lines.length;
+    i++
+  ) {
+
+    const columns =
+      parseCsvLine(
+        lines[i]
+      );
+
+
+    const row = {};
+
+
+    for (
+      let j = 0;
+      j < headers.length;
+      j++
+    ) {
+
+      row[
+        headers[j]
+      ] =
+        columns[j] ??
+        "";
+    }
+
+
+    result.push(
+      row
+    );
+  }
+
+
+  return result;
+}
+
+
+// =========================================================
+// CSV LINE
+// =========================================================
+
+function parseCsvLine(
+  line
+) {
+
+  const result = [];
+
+  let current = "";
+
+  let quoted =
+    false;
+
+
+  for (
+    let i = 0;
+    i < line.length;
+    i++
+  ) {
+
+    const char =
+      line[i];
+
+
+    if (
+      char === '"'
+    ) {
+
+      if (
+        quoted &&
+        line[i + 1] === '"'
+      ) {
+
+        current += '"';
+
+        i++;
+
+      } else {
+
+        quoted =
+          !quoted;
+      }
+
+    } else if (
+      char === "," &&
+      !quoted
+    ) {
+
+      result.push(
+        current.trim()
+      );
+
+      current = "";
+
+    } else {
+
+      current += char;
+    }
+  }
+
+
+  result.push(
+    current.trim()
+  );
+
+
+  return result;
+}
+
+
+// =========================================================
+// SKU NORMALIZER
+// =========================================================
+
+function normalizeSku(
+  value
+) {
+
+  return String(
+    value ?? ""
+  )
+    .trim()
+    .replace(
+      /\.0$/,
+      ""
+    );
+}
+
+
+// =========================================================
+// MASTER VALUE
+// =========================================================
+
+function getMasterValue(
+  row,
+  possibleNames
+) {
+
+  for (
+    const name of
+    possibleNames
+  ) {
+
+    if (
+      row[name] !==
+      undefined
+    ) {
+
+      return String(
+        row[name] ??
+        ""
+      ).trim();
+    }
+  }
+
+
+  return "";
 }
 
 
@@ -670,7 +1293,6 @@ function normalizeImage(
   if (!value) {
 
     return "";
-
   }
 
 
@@ -678,7 +1300,6 @@ function normalizeImage(
     String(value).trim();
 
 
-  // Sudah data:image
   if (
     image.startsWith(
       "data:image/"
@@ -686,11 +1307,9 @@ function normalizeImage(
   ) {
 
     return image;
-
   }
 
 
-  // Format <img src="...">
   const match =
     image.match(
       /<img[^>]+src=["']([^"']+)["']/i
@@ -700,11 +1319,9 @@ function normalizeImage(
   if (match) {
 
     return match[1];
-
   }
 
 
-  // Base64 mentah
   image =
     image.replace(
       /\s/g,
@@ -712,8 +1329,79 @@ function normalizeImage(
     );
 
 
-  return `data:image/png;base64,${image}`;
+  return (
+    "data:image/png;base64," +
+    image
+  );
+}
 
+
+// =========================================================
+// BASE64 → UINT8 ARRAY
+// =========================================================
+
+function base64ToUint8Array(
+  value
+) {
+
+  let base64 =
+    String(value)
+      .trim();
+
+
+  if (
+    base64.startsWith(
+      "data:"
+    )
+  ) {
+
+    const comma =
+      base64.indexOf(",");
+
+
+    if (
+      comma !== -1
+    ) {
+
+      base64 =
+        base64.slice(
+          comma + 1
+        );
+    }
+  }
+
+
+  base64 =
+    base64.replace(
+      /\s/g,
+      ""
+    );
+
+
+  const binary =
+    atob(
+      base64
+    );
+
+
+  const bytes =
+    new Uint8Array(
+      binary.length
+    );
+
+
+  for (
+    let i = 0;
+    i < binary.length;
+    i++
+  ) {
+
+    bytes[i] =
+      binary.charCodeAt(i);
+  }
+
+
+  return bytes;
 }
 
 
@@ -728,32 +1416,223 @@ function escapeHtml(
   return String(
     value ?? ""
   )
-
     .replace(
       /&/g,
       "&amp;"
     )
-
     .replace(
       /</g,
       "&lt;"
     )
-
     .replace(
       />/g,
       "&gt;"
     )
-
     .replace(
       /"/g,
       "&quot;"
     )
-
     .replace(
       /'/g,
       "&#039;"
     );
+}
 
+
+// =========================================================
+// PDF CSS
+// =========================================================
+
+function addPdfCss(
+  html
+) {
+
+  const css = `
+
+    <style>
+
+      @page {
+
+        size: A4 portrait;
+
+        margin: 0;
+
+      }
+
+
+      html,
+      body {
+
+        margin: 0;
+
+        padding: 0;
+
+      }
+
+
+      .pdf-page {
+
+        position: relative;
+
+        width: 210mm;
+
+        height: 297mm;
+
+        box-sizing: border-box;
+
+        page-break-after: always;
+
+        overflow: hidden;
+
+      }
+
+
+      .pdf-page:last-child {
+
+        page-break-after: auto;
+
+      }
+
+
+      table {
+
+        width: 100%;
+
+        border-collapse: collapse;
+
+      }
+
+
+      table th,
+      table td {
+
+        border: 1px solid #000;
+
+        padding: 4px;
+
+        vertical-align: top;
+
+      }
+
+
+      .medicine-table {
+
+        width: 100%;
+
+        table-layout: fixed;
+
+        font-size: 9px;
+
+      }
+
+
+      .medicine-table th:nth-child(1) {
+
+        width: 6%;
+
+      }
+
+
+      .medicine-table th:nth-child(2) {
+
+        width: 25%;
+
+      }
+
+
+      .medicine-table th:nth-child(3) {
+
+        width: 10%;
+
+      }
+
+
+      .medicine-table th:nth-child(4) {
+
+        width: 19%;
+
+      }
+
+
+      .medicine-table th:nth-child(5) {
+
+        width: 12%;
+
+      }
+
+
+      .medicine-table th:nth-child(6) {
+
+        width: 8%;
+
+      }
+
+
+      .medicine-table th:nth-child(7) {
+
+        width: 20%;
+
+      }
+
+
+      .signature-container {
+
+        position: relative;
+
+        width: 150px;
+
+        height: 100px;
+
+      }
+
+
+      .signature-container .stamp {
+
+        position: absolute;
+
+        left: 40px;
+
+        top: 15px;
+
+        width: 85px;
+
+        height: 85px;
+
+        object-fit: contain;
+
+        z-index: 1;
+
+      }
+
+
+      .signature-container .signature {
+
+        position: absolute;
+
+        left: 0;
+
+        top: 0;
+
+        width: 105px;
+
+        height: 60px;
+
+        object-fit: contain;
+
+        z-index: 2;
+
+      }
+
+    </style>
+
+  `;
+
+
+  return html.replace(
+    "</head>",
+    css +
+    "</head>"
+  );
 }
 
 
@@ -765,9 +1644,7 @@ function bytesToBase64(
   bytes
 ) {
 
-  let binary =
-    "";
-
+  let binary = "";
 
   const chunk =
     0x8000;
@@ -789,14 +1666,12 @@ function bytesToBase64(
           )
         )
       );
-
   }
 
 
   return btoa(
     binary
   );
-
 }
 
 
@@ -810,11 +1685,9 @@ function response(
 ) {
 
   return new Response(
-
     JSON.stringify(
       data
     ),
-
     {
 
       status,
@@ -827,7 +1700,5 @@ function response(
       }
 
     }
-
   );
-
 }
