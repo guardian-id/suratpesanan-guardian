@@ -299,6 +299,7 @@ export default {
 
 
         // Hilangkan placeholder lainnya
+
         page =
           page.replace(
             /\{\{[^{}]+\}\}/g,
@@ -306,8 +307,8 @@ export default {
           );
 
 
-        // Pastikan setiap halaman
-        // menjadi halaman A4 sendiri
+        // Setiap halaman menjadi A4
+
         page =
           wrapPage(
             page
@@ -482,9 +483,6 @@ function detectTemplate(
       .toLowerCase();
 
 
-  // Hanya kalau mengandung prekursor
-  // dianggap Prekursor
-
   if (
     name.includes(
       "prekursor"
@@ -494,8 +492,6 @@ function detectTemplate(
     return "prekursor";
   }
 
-
-  // Selain itu Reguler
 
   return "reguler";
 }
@@ -738,11 +734,6 @@ function parseProductsByPage(
     }
 
 
-    /*
-      Hanya halaman yang memiliki
-      data produk yang dimasukkan.
-    */
-
     if (
       products.length > 0
     ) {
@@ -812,39 +803,30 @@ function parseProductLine(
   return {
 
     no:
-
       no,
 
     sku:
-
       sku,
 
     description:
-
       endMatch[1].trim(),
 
     kemasan:
-
       endMatch[2].trim(),
 
     casePack:
-
       endMatch[3].trim(),
 
     qty:
-
       endMatch[4].trim(),
 
     batch:
-
       endMatch[5].trim(),
 
     expiredDate:
-
       endMatch[6].trim(),
 
     invoice:
-
       endMatch[7].trim()
 
   };
@@ -883,9 +865,32 @@ function buildMedicineTable(
     ) {
 
       const master =
-        findPrekursorBySku(
-          masterPrekursor,
-          product.sku
+        masterPrekursor.find(
+          row => {
+
+            const masterSku =
+              getMasterValue(
+                row,
+                [
+                  "Produck SKU",
+                  "Product SKU",
+                  "ProductSKU",
+                  "SKU",
+                  "Sku",
+                  "sku"
+                ]
+              );
+
+
+            return (
+              normalizeSku(
+                masterSku
+              ) ===
+              normalizeSku(
+                product.sku
+              )
+            );
+          }
         );
 
 
@@ -896,9 +901,6 @@ function buildMedicineTable(
             master,
             [
               "Zat Aktif Prekursor",
-              "ZatAktifPrekursor",
-              "ZAT AKTIF PREKURSOR",
-              "zat_aktif_prekursor",
               "Zat Aktif",
               "ZatAktif",
               "ZAT AKTIF",
@@ -912,9 +914,6 @@ function buildMedicineTable(
             master,
             [
               "Bentuk dan Kekuatan Sediaan",
-              "BentukDanKekuatanSediaan",
-              "BENTUK DAN KEKUATAN SEDIAAN",
-              "bentuk_dan_kekuatan_sediaan",
               "Bentuk",
               "BENTUK",
               "bentuk"
@@ -1028,23 +1027,23 @@ function buildMedicineTable(
 
 async function loadPrekursorMaster() {
 
-  const response =
+  const masterResponse =
     await fetch(
       MASTER_PREKURSOR_URL
     );
 
 
-  if (!response.ok) {
+  if (!masterResponse.ok) {
 
     throw new Error(
       "master_prekursor.csv gagal diambil. HTTP " +
-      response.status
+      masterResponse.status
     );
   }
 
 
   const csv =
-    await response.text();
+    await masterResponse.text();
 
 
   return parseCsv(
@@ -1079,11 +1078,6 @@ function parseCsv(
     return [];
   }
 
-
-  // =====================================================
-  // HEADER CSV
-  // Bersihkan BOM dari header pertama
-  // =====================================================
 
   const headers =
     parseCsvLine(
@@ -1214,146 +1208,6 @@ function parseCsvLine(
 
 
 // =========================================================
-// FIND PREKURSOR BY SKU
-// =========================================================
-
-function findPrekursorBySku(
-  master,
-  sku
-) {
-
-  const targetSku =
-    normalizeSku(
-      sku
-    );
-
-
-  if (!targetSku) {
-
-    return null;
-  }
-
-
-  for (
-    const row of master
-  ) {
-
-    const csvSku =
-      getSkuFromMaster(
-        row
-      );
-
-
-    if (
-      csvSku &&
-      normalizeSku(
-        csvSku
-      ) === targetSku
-    ) {
-
-      return row;
-    }
-  }
-
-
-  return null;
-}
-
-
-// =========================================================
-// GET SKU FROM MASTER CSV
-// Mendukung berbagai nama header SKU
-// =========================================================
-
-function getSkuFromMaster(
-  row
-) {
-
-  const possibleNames = [
-
-    "SKU",
-    "sku",
-    "Sku",
-
-    "Product SKU",
-    "PRODUCT SKU",
-    "product sku",
-
-    "ProductSKU",
-    "PRODUCTSKU",
-    "productsku",
-
-    "Product_Sku",
-    "product_sku",
-
-    "Product-SKU",
-    "PRODUCT-SKU"
-
-  ];
-
-
-  // =====================================================
-  // CEK NAMA HEADER YANG UMUM
-  // =====================================================
-
-  for (
-    const name of possibleNames
-  ) {
-
-    if (
-      row[name] !== undefined &&
-      row[name] !== null &&
-      String(
-        row[name]
-      ).trim() !== ""
-    ) {
-
-      return String(
-        row[name]
-      ).trim();
-    }
-  }
-
-
-  // =====================================================
-  // FALLBACK
-  // Normalisasi nama header
-  // =====================================================
-
-  for (
-    const key of Object.keys(row)
-  ) {
-
-    const normalizedKey =
-      String(key)
-        .replace(
-          /^\uFEFF/,
-          ""
-        )
-        .replace(
-          /[\s_\-]/g,
-          ""
-        )
-        .toLowerCase();
-
-
-    if (
-      normalizedKey === "sku" ||
-      normalizedKey === "productsku"
-    ) {
-
-      return String(
-        row[key] ?? ""
-      ).trim();
-    }
-  }
-
-
-  return "";
-}
-
-
-// =========================================================
 // SKU NORMALIZER
 // =========================================================
 
@@ -1365,20 +1219,20 @@ function normalizeSku(
     value ?? ""
   )
     .replace(
-      /^\uFEFF/,
+      /\uFEFF/g,
+      ""
+    )
+    .replace(
+      /[\u200B-\u200D\u00A0]/g,
       ""
     )
     .trim()
     .replace(
-      /^["']|["']$/g,
+      /^["']+|["']+$/g,
       ""
     )
     .replace(
       /\.0$/,
-      ""
-    )
-    .replace(
-      /\s+/g,
       ""
     );
 }
@@ -1412,40 +1266,32 @@ function getMasterValue(
 
 
   // =====================================================
-  // FALLBACK HEADER NORMALIZATION
+  // FALLBACK:
+  // CARI HEADER SECARA NORMALIZED
   // =====================================================
 
-  const normalizedTargets =
+  const wanted =
     possibleNames.map(
       name =>
-        String(name)
-          .replace(
-            /[\s_\-]/g,
-            ""
-          )
-          .toLowerCase()
+        normalizeHeader(
+          name
+        )
     );
 
 
   for (
-    const key of Object.keys(row)
+    const key of
+    Object.keys(row)
   ) {
 
     const normalizedKey =
-      String(key)
-        .replace(
-          /^\uFEFF/,
-          ""
-        )
-        .replace(
-          /[\s_\-]/g,
-          ""
-        )
-        .toLowerCase();
+      normalizeHeader(
+        key
+      );
 
 
     if (
-      normalizedTargets.includes(
+      wanted.includes(
         normalizedKey
       )
     ) {
@@ -1459,6 +1305,34 @@ function getMasterValue(
 
 
   return "";
+}
+
+
+// =========================================================
+// NORMALIZE CSV HEADER
+// =========================================================
+
+function normalizeHeader(
+  value
+) {
+
+  return String(
+    value ?? ""
+  )
+    .replace(
+      /\uFEFF/g,
+      ""
+    )
+    .replace(
+      /[\u200B-\u200D\u00A0]/g,
+      ""
+    )
+    .trim()
+    .toLowerCase()
+    .replace(
+      /[\s_-]+/g,
+      ""
+    );
 }
 
 
@@ -1772,7 +1646,7 @@ function addPdfCss(
 
         left: 40px;
 
-        top: 15px;
+        top: -23px;
 
         width: 85px;
 
