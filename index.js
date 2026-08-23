@@ -44,15 +44,6 @@ export default {
 
       // =====================================================
       // TEMPLATE
-      //
-      // Reguler:
-      // Reguler
-      // Reguler.pdf
-      // reguler
-      //
-      // Prekursor:
-      // Prekursor
-      // Prekursor.pdf
       // =====================================================
 
       const templateName =
@@ -80,7 +71,7 @@ export default {
 
 
       // =====================================================
-      // AMBIL TEMPLATE HTML
+      // AMBIL TEMPLATE HTML DARI GITHUB
       // =====================================================
 
       const templateResponse =
@@ -272,9 +263,6 @@ export default {
 
       // =====================================================
       // BUAT HTML UNTUK SETIAP HALAMAN
-      //
-      // PDF sumber 6 halaman
-      // → template 6 halaman
       // =====================================================
 
       const pageHtml = [];
@@ -310,7 +298,6 @@ export default {
             );
 
 
-        // Hilangkan placeholder lainnya
         page =
           page.replace(
             /\{\{[^{}]+\}\}/g,
@@ -318,8 +305,6 @@ export default {
           );
 
 
-        // Pastikan setiap halaman
-        // menjadi halaman A4 sendiri
         page =
           wrapPage(
             page
@@ -481,34 +466,58 @@ export default {
 // =========================================================
 // DETECT TEMPLATE
 // =========================================================
+//
+// PENTING:
+// "Reguler"        → reguler
+// "Reguler.pdf"   → reguler
+// "reguler"       → reguler
+//
+// "Prekursor"     → prekursor
+// "Prekursor.pdf" → prekursor
+//
+// Kalau kosong / tidak dikenal → REGULER
+// =========================================================
 
 function detectTemplate(
   value
 ) {
 
-  const name =
+  let name =
     String(
-      value || "Reguler"
+      value ?? "Reguler"
     )
       .trim()
       .toLowerCase();
 
 
-  // Hanya kalau mengandung prekursor
-  // dianggap Prekursor
-
-  if (
-    name.includes(
-      "prekursor"
+  // Hapus extension .pdf
+  name =
+    name.replace(
+      /\.pdf$/i,
+      ""
     )
+    .trim();
+
+
+  // EXACT MATCH REGULER
+  if (
+    name === "reguler"
+  ) {
+
+    return "reguler";
+  }
+
+
+  // EXACT MATCH PREKURSOR
+  if (
+    name === "prekursor"
   ) {
 
     return "prekursor";
   }
 
 
-  // Selain itu Reguler
-
+  // Fallback aman
   return "reguler";
 }
 
@@ -750,11 +759,6 @@ function parseProductsByPage(
     }
 
 
-    /*
-      Hanya halaman yang memiliki
-      data produk yang dimasukkan.
-    */
-
     if (
       products.length > 0
     ) {
@@ -787,15 +791,6 @@ function parseProductLine(
       .trim();
 
 
-  /*
-    Contoh:
-
-    1 3102695
-    ACETYLSISTEINE...
-    BOX 20 2 EIK113
-    2027-11-01 58216245
-  */
-
   const startMatch =
     text.match(
       /^(\d+)\s+(\d{5,})\s+(.+)$/
@@ -818,17 +813,6 @@ function parseProductLine(
     startMatch[3].trim();
 
 
-  /*
-    Dari belakang:
-
-    invoice
-    expired
-    batch
-    qty
-    case pack
-    kemasan
-  */
-
   const endMatch =
     rest.match(
       /^(.+?)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
@@ -844,39 +828,30 @@ function parseProductLine(
   return {
 
     no:
-
       no,
 
     sku:
-
       sku,
 
     description:
-
       endMatch[1].trim(),
 
     kemasan:
-
       endMatch[2].trim(),
 
     casePack:
-
       endMatch[3].trim(),
 
     qty:
-
       endMatch[4].trim(),
 
     batch:
-
       endMatch[5].trim(),
 
     expiredDate:
-
       endMatch[6].trim(),
 
     invoice:
-
       endMatch[7].trim()
 
   };
@@ -906,7 +881,7 @@ function buildMedicineTable(
 
 
     // ===================================================
-    // PREKURSOR LOOKUP
+    // HANYA PREKURSOR → LOOKUP MASTER
     // ===================================================
 
     if (
@@ -953,69 +928,168 @@ function buildMedicineTable(
     }
 
 
-    /*
-      KETERANGAN SEKARANG HANYA INVOICE
-    */
-
     const keterangan =
       escapeHtml(
         product.invoice
       );
 
 
-    rows += `
+    // ===================================================
+    // REGULER
+    // 5 KOLOM
+    // ===================================================
 
-      <tr>
+    if (
+      templateName ===
+      "reguler"
+    ) {
 
-        <td>
-          ${escapeHtml(
-            product.no
-          )}
-        </td>
+      rows += `
 
-        <td>
-          ${escapeHtml(
-            product.description
-          )}
-        </td>
+        <tr>
 
-        <td>
-          ${escapeHtml(
-            product.kemasan
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.no
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            zatAktif
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.description
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            bentuk
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.kemasan
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            product.qty
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.qty
+            )}
+          </td>
 
-        <td>
-          ${keterangan}
-        </td>
+          <td>
+            ${keterangan}
+          </td>
 
-      </tr>
+        </tr>
+
+      `;
+
+    }
+
+    // ===================================================
+    // PREKURSOR
+    // 7 KOLOM
+    // ===================================================
+
+    else {
+
+      rows += `
+
+        <tr>
+
+          <td>
+            ${escapeHtml(
+              product.no
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.description
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.kemasan
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              zatAktif
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              bentuk
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.qty
+            )}
+          </td>
+
+          <td>
+            ${keterangan}
+          </td>
+
+        </tr>
+
+      `;
+    }
+  }
+
+
+  // ===================================================
+  // HEADER REGULER
+  // ===================================================
+
+  if (
+    templateName ===
+    "reguler"
+  ) {
+
+    return `
+
+      <table class="medicine-table reguler-table">
+
+        <thead>
+
+          <tr>
+
+            <th>No</th>
+
+            <th>Nama Obat</th>
+
+            <th>Satuan</th>
+
+            <th>Jumlah</th>
+
+            <th>Keterangan</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          ${rows}
+
+        </tbody>
+
+      </table>
 
     `;
   }
 
 
+  // ===================================================
+  // HEADER PREKURSOR
+  // ===================================================
+
   return `
 
-    <table class="medicine-table">
+    <table class="medicine-table prekursor-table">
 
       <thead>
 
@@ -1526,49 +1600,92 @@ function addPdfCss(
       }
 
 
-      .medicine-table th:nth-child(1) {
+      /* ============================
+         REGULER
+         ============================ */
 
-        width: 6%;
+      .reguler-table th:nth-child(1) {
 
-      }
-
-
-      .medicine-table th:nth-child(2) {
-
-        width: 25%;
+        width: 7%;
 
       }
 
 
-      .medicine-table th:nth-child(3) {
+      .reguler-table th:nth-child(2) {
+
+        width: 48%;
+
+      }
+
+
+      .reguler-table th:nth-child(3) {
+
+        width: 15%;
+
+      }
+
+
+      .reguler-table th:nth-child(4) {
 
         width: 10%;
 
       }
 
 
-      .medicine-table th:nth-child(4) {
+      .reguler-table th:nth-child(5) {
+
+        width: 20%;
+
+      }
+
+
+      /* ============================
+         PREKURSOR
+         ============================ */
+
+      .prekursor-table th:nth-child(1) {
+
+        width: 6%;
+
+      }
+
+
+      .prekursor-table th:nth-child(2) {
+
+        width: 25%;
+
+      }
+
+
+      .prekursor-table th:nth-child(3) {
+
+        width: 10%;
+
+      }
+
+
+      .prekursor-table th:nth-child(4) {
 
         width: 19%;
 
       }
 
 
-      .medicine-table th:nth-child(5) {
+      .prekursor-table th:nth-child(5) {
 
         width: 12%;
 
       }
 
 
-      .medicine-table th:nth-child(6) {
+      .prekursor-table th:nth-child(6) {
 
         width: 8%;
 
       }
 
 
-      .medicine-table th:nth-child(7) {
+      .prekursor-table th:nth-child(7) {
 
         width: 20%;
 
