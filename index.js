@@ -1684,7 +1684,7 @@ function addPdfCss(
 
         left: 40px;
 
-        top: 5px;
+        top: -5px;
 
         width: 85px;
 
