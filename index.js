@@ -225,6 +225,8 @@ export default {
 
       // =====================================================
       // MASTER PREKURSOR
+      //
+      // HANYA LOAD JIKA PREKURSOR
       // =====================================================
 
       let masterPrekursor =
@@ -263,6 +265,9 @@ export default {
 
       // =====================================================
       // BUAT HTML UNTUK SETIAP HALAMAN
+      //
+      // PDF sumber 6 halaman
+      // → template 6 halaman
       // =====================================================
 
       const pageHtml = [];
@@ -298,7 +303,9 @@ export default {
             );
 
 
-        // Hilangkan placeholder lainnya
+        // ===================================================
+        // HILANGKAN PLACEHOLDER YANG MASIH TERSISA
+        // ===================================================
 
         page =
           page.replace(
@@ -307,7 +314,9 @@ export default {
           );
 
 
-        // Setiap halaman menjadi A4
+        // ===================================================
+        // SETIAP PAGE = 1 A4
+        // ===================================================
 
         page =
           wrapPage(
@@ -482,6 +491,14 @@ function detectTemplate(
       .trim()
       .toLowerCase();
 
+
+  // =====================================================
+  // HANYA YANG MENGANDUNG "PREKURSOR"
+  // → PREKURSOR
+  //
+  // SEMUA SELAIN ITU
+  // → REGULER
+  // =====================================================
 
   if (
     name.includes(
@@ -836,6 +853,19 @@ function parseProductLine(
 // =========================================================
 // BUILD MEDICINE TABLE
 // =========================================================
+//
+// INI SATU-SATUNYA BAGIAN YANG KITA PERBAIKI:
+//
+// REGULER:
+// No | Nama Obat | Satuan | Jumlah | Keterangan
+//
+// PREKURSOR:
+// No | Nama Obat | Satuan |
+// Zat Aktif Prekursor |
+// Bentuk dan Kekuatan Sediaan |
+// Jumlah | Keterangan
+//
+// =========================================================
 
 function buildMedicineTable(
   products,
@@ -856,7 +886,7 @@ function buildMedicineTable(
 
 
     // ===================================================
-    // PREKURSOR LOOKUP
+    // LOOKUP HANYA UNTUK PREKURSOR
     // ===================================================
 
     if (
@@ -897,34 +927,23 @@ function buildMedicineTable(
       if (master) {
 
         zatAktif =
-          getMasterValue(
-            master,
-            [
-              "Zat Aktif Prekursor",
-              "Zat Aktif",
-              "ZatAktif",
-              "ZAT AKTIF",
-              "zat_aktif"
-            ]
-          );
+          String(
+            master["Zat Aktif"] ??
+            ""
+          ).trim();
 
 
         bentuk =
-          getMasterValue(
-            master,
-            [
-              "Bentuk dan Kekuatan Sediaan",
-              "Bentuk",
-              "BENTUK",
-              "bentuk"
-            ]
-          );
+          String(
+            master["Bentuk"] ??
+            ""
+          ).trim();
       }
     }
 
 
     // ===================================================
-    // KETERANGAN = INVOICE
+    // KETERANGAN = INVOICE NO
     // ===================================================
 
     const keterangan =
@@ -933,55 +952,158 @@ function buildMedicineTable(
       );
 
 
-    rows += `
+    // ===================================================
+    // REGULER
+    // ===================================================
 
-      <tr>
+    if (
+      templateName ===
+      "reguler"
+    ) {
 
-        <td>
-          ${escapeHtml(
-            product.no
-          )}
-        </td>
+      rows += `
 
-        <td>
-          ${escapeHtml(
-            product.description
-          )}
-        </td>
+        <tr>
 
-        <td>
-          ${escapeHtml(
-            product.kemasan
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.no
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            zatAktif
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.description
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            bentuk
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.kemasan
+            )}
+          </td>
 
-        <td>
-          ${escapeHtml(
-            product.qty
-          )}
-        </td>
+          <td>
+            ${escapeHtml(
+              product.qty
+            )}
+          </td>
 
-        <td>
-          ${keterangan}
-        </td>
+          <td>
+            ${keterangan}
+          </td>
 
-      </tr>
+        </tr>
+
+      `;
+
+    }
+
+
+    // ===================================================
+    // PREKURSOR
+    // ===================================================
+
+    else {
+
+      rows += `
+
+        <tr>
+
+          <td>
+            ${escapeHtml(
+              product.no
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.description
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.kemasan
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              zatAktif
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              bentuk
+            )}
+          </td>
+
+          <td>
+            ${escapeHtml(
+              product.qty
+            )}
+          </td>
+
+          <td>
+            ${keterangan}
+          </td>
+
+        </tr>
+
+      `;
+    }
+
+  }
+
+
+  // =====================================================
+  // RETURN REGULER TABLE
+  // =====================================================
+
+  if (
+    templateName ===
+    "reguler"
+  ) {
+
+    return `
+
+      <table class="medicine-table">
+
+        <thead>
+
+          <tr>
+
+            <th>No</th>
+
+            <th>Nama Obat</th>
+
+            <th>Satuan</th>
+
+            <th>Jumlah</th>
+
+            <th>Keterangan</th>
+
+          </tr>
+
+        </thead>
+
+        <tbody>
+
+          ${rows}
+
+        </tbody>
+
+      </table>
 
     `;
   }
 
+
+  // =====================================================
+  // RETURN PREKURSOR TABLE
+  // =====================================================
 
   return `
 
@@ -1027,23 +1149,23 @@ function buildMedicineTable(
 
 async function loadPrekursorMaster() {
 
-  const masterResponse =
+  const response =
     await fetch(
       MASTER_PREKURSOR_URL
     );
 
 
-  if (!masterResponse.ok) {
+  if (!response.ok) {
 
     throw new Error(
       "master_prekursor.csv gagal diambil. HTTP " +
-      masterResponse.status
+      response.status
     );
   }
 
 
   const csv =
-    await masterResponse.text();
+    await response.text();
 
 
   return parseCsv(
@@ -1084,12 +1206,7 @@ function parseCsv(
       lines[0]
     ).map(
       header =>
-        String(header)
-          .replace(
-            /^\uFEFF/,
-            ""
-          )
-          .trim()
+        header.trim()
     );
 
 
@@ -1218,19 +1335,7 @@ function normalizeSku(
   return String(
     value ?? ""
   )
-    .replace(
-      /\uFEFF/g,
-      ""
-    )
-    .replace(
-      /[\u200B-\u200D\u00A0]/g,
-      ""
-    )
     .trim()
-    .replace(
-      /^["']+|["']+$/g,
-      ""
-    )
     .replace(
       /\.0$/,
       ""
@@ -1265,74 +1370,7 @@ function getMasterValue(
   }
 
 
-  // =====================================================
-  // FALLBACK:
-  // CARI HEADER SECARA NORMALIZED
-  // =====================================================
-
-  const wanted =
-    possibleNames.map(
-      name =>
-        normalizeHeader(
-          name
-        )
-    );
-
-
-  for (
-    const key of
-    Object.keys(row)
-  ) {
-
-    const normalizedKey =
-      normalizeHeader(
-        key
-      );
-
-
-    if (
-      wanted.includes(
-        normalizedKey
-      )
-    ) {
-
-      return String(
-        row[key] ??
-        ""
-      ).trim();
-    }
-  }
-
-
   return "";
-}
-
-
-// =========================================================
-// NORMALIZE CSV HEADER
-// =========================================================
-
-function normalizeHeader(
-  value
-) {
-
-  return String(
-    value ?? ""
-  )
-    .replace(
-      /\uFEFF/g,
-      ""
-    )
-    .replace(
-      /[\u200B-\u200D\u00A0]/g,
-      ""
-    )
-    .trim()
-    .toLowerCase()
-    .replace(
-      /[\s_-]+/g,
-      ""
-    );
 }
 
 
@@ -1646,7 +1684,7 @@ function addPdfCss(
 
         left: 40px;
 
-        top: -23px;
+        top: 5px;
 
         width: 85px;
 
