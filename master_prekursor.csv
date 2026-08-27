@@ -1,52 +1,71 @@
 ﻿Produck SKU,Zat Aktif,Bentuk
-3085939,Dextromethorphan,Tablet/15mg
-3085938,Dextromethorphan,Tablet/3.5mg
-1398813,Ephedrin HCL,"Sirup/2,5mg"
-2284891,Ephedrin HCL,"Sirup/2,5mg"
-1502884,Ephedrin HCL,"Sirup/2,5mg"
-2877517,Ephedrin HCL,"Sirup/2,5mg"
-110885,Ephedrin HCL,"Sirup/2,5mg"
-3093439,Ephedrin HCL,"Sirup/2,5mg"
-110537,Phenylpropanolamine HCL,Tablet/15mg
-3085912,Phenylpropanolamine HCL,Tablet/15mg
-110617,Phenylpropanolamine HCL,Tablet/30mg
-1280926,Phenylpropanolamine HCL,Tablet/15mg
-3085918,Phenylpropanolamine HCL,Tablet/15mg
-1398822,Pseudoefedrin HCL,"Sirup/7,5mg"
-2839465,Pseudoefedrin HCL,"Sirup/7,5mg"
-2107571,Pseudoefedrin HCL,Sirup/15mg
-2546788,Pseudoefedrin HCL,Sirup/15mg
-2839563,Pseudoefedrin HCL,Sirup/15mg
-1282671,Pseudoefedrin HCL,Tablet/60mg
-1741326,Pseudoefedrin HCL,Kapsul/120mg
-1584757,Pseudoefedrin HCL,Sirup/30mg
-2107553,Pseudoefedrin HCL,Sirup/15mg
-569293,Pseudoefedrin HCL,"Sirup/7,5mg"
-221463,Pseudoefedrin HCL,Tablet/30mg
-1565076,Pseudoefedrin HCL,Tablet/30mg
-2004834,Pseudoefedrin HCL,Tablet/30mg
-110573,Pseudoefedrin HCL,Tablet/30mg
-110368,Pseudoefedrin HCL,Tablet/30mg
-1283035,Pseudoefedrin HCL,Sirup/15mg
-1502893,Pseudoefedrin HCL,"Sirup/7,5mg"
-2107606,Pseudoefedrin HCL,Sirup/15mg
-1584712,Pseudoefedrin HCL,Sirup/30mg
-1919215,Pseudoefedrin HCL,"Sirup/7,5mg"
-1282956,Pseudoefedrin HCL,Tablet/30mg
-1506435,Pseudoefedrin HCL,Tablet/120mg
-2407467,Pseudoefedrin HCL,Tablet/30mg
-3028039,Pseudoefedrin HCL,Tablet/120mg
-2464773,Pseudoefedrin HCL,Sirup/15mg
-2923508,Pseudoefedrin HCL,"Sirup/7,5mg"
-1850534,Pseudoefedrin HCL,Sirup/15mg
-1584703,Pseudoefedrin HCL ,Sirup/30mg
-3127638,Pseudoephedrine HCl,Sirup/30 mg
-3125440,Pseudoephedrine HCl,Sirup/30mg
-3025307,Pseudoephedrine HCl,"Syrup/7,5mg"
-110751,Phenylpropanolamine HCL,"Tablet/12,5 mg"
-3119097,Pseudoephedrine HCL / Triprolidine HCl,Tablet/60 mg
-3125568,Pseudoephedrine HCl,"Sirup/7,5 mg"
-3127299,Phenylpropanolamine HCl,Kaplet/15 mg
-3124935,Pseudoephedrine HCl,Sirup/15 mg
-3124886,Pseudoephedrine HCl,"Sirup/7,5 mg"
-3119175,Pseudoephedrine HCl,Sirup/15 mg
+1584703,Pseudoephedrine HCl ,Sirup 30 mg/5mL
+1584712,Pseudoephedrine HCl,Sirup 30 mg/5mL
+1584757,Pseudoephedrine HCl ,Sirup 30 mg/5mL
+0569293,Pseudoephedrine HCl,Sirup 7.5 mg/5mL
+1280926,Phenylpropanolamine HCl,Tablet 15 mg
+1982057,Dextromethorphan HBr,Tablet 12 mg
+2004834,Pseudoephedrine HCl,Tablet 30 mg
+0110573,Phenylpropanolamine HCl,Tablet12.5 mg
+0221463,Pseudoephedrine HCl ,Kapsul 30 mg
+0110368,Pseudoephedrine HCl ,Tablet 30 mg
+3046650,Dextromethorphan HBr,Sirup 15 mg / 5mL
+3046672,Dextromethorphan HBr,Sirup 15 mg / 5mL
+3046673,Dextromethorphan HBr,Sirup 15 mg / 5mL
+0110751,Dextromethorphan HBr,Tablet 5 mg
+3085912,Phenylpropanolamine HCl,Tablet 15 mg
+0110537,Pseudoephedrine HCl,Tablet 30 mg
+3106979,Dextromethorphan HBr,Sirup 12.5 mg /5 mL
+2284891,Pseudoephedrine HCl,Sirup 10 mg/5mL
+2877517,Pseudoephedrine HCl,Sirup 10mg/5mL
+1398822,Pseudoephedrine HCl ,Sirup 7.5 mg/5mL
+1398813,Pseudoephedrine HCl,Sirup 10 mg/5mL
+1502884,Pseudoephedrine HCl,Sirup 10 mg/5mL
+1502893,Pseudoephedrine HCl ,Sirup 7.5 mg/5mL
+3045160,Dextromethorphan HBr,Tablet 15 mg
+1565076,Pseudoephedrine HCl ,Tablet 30 mg
+2407467,Pseudoephedrine HCl ,Tablet 30 mg
+3085918,Phenylpropanolamine HCl,Tablet 15 mg
+3106409,Dextromethorphan HBr,Tablet 10 mg
+3107391,Dextromethorphan HBr,Tablet 15 mg
+3085939,Phenylpropanolamine HCl,Tablet 15 mg
+3085938,Phenylpropanolamine HCl,Tablet 12.5 mg
+1283035,Pseudoephedrine HCl,Sirup 30 mg/5mL
+1282956,Pseudoephedrine HCl,Tablet 60 mg
+2839563,Pseudoephedrine HCl,Sirup 15 mg/5mL
+2839465,Pseudoephedrine HCl,Larutan 7.5 mg/0.8mL
+1741326,Pseudoephedrine HCl,Kapsul 120 mg
+2546788,Pseudoephedrine HCl ,Sirup 15 mg/5mL
+0110617,Pseudoephedrine HCl ,Tablet 30 mg
+1278621,Tramadol HCl,Tablet 50 mg
+2107553,Pseudoephedrine HCl ,Sirup 15 mg/5mL
+2107606,Pseudoephedrine HCl ,Sirup 15 mg/5mL
+2107571,PSEUDOEFEDRINE HCL 15 MG,SYR 15 MG/5ML
+1282671,Pseudoephedrine HCl ,Tablet 60 mg
+3014566,Tramadol HCl,Tablet 37.5 mg
+2576072,Dextromethorphan HBr,Sirup 3.5 mg / 5 mL
+2680892,Dextromethorphan HBr,Sirup 5 mg / 5 mL
+3043016,Dextromethorphan HBr,Sirup 5 mg / 5 mL
+2259121,Dextromethorphan HBr,Sirup 5 mg / 5 mL
+1726284,Dextromethorphan HBr,Sirup 7.5 mg / 5 mL
+2355057,Dextromethorphan HBr,Sirup 7.5 mg / 5 mL
+1919215,Pseudoephedrine HCl,Sirup 7.5 mg/5mL
+3025307,Pseudoephedrine HCl,Sirup 7.5 mg/5mL
+3119097,Pseudoephedrin HCl,Tablet 30 mg
+3119175,Pseudoephedrine HCl,Sirup 15 mg/5mL
+3119176,Dextromethorphan HBr,Sirup 15 mg / 5 mL
+1506435,PSEUDOEFEDRINE HCL,TAB 120 Mg
+3124474,Dextromethorphan HBr,Sirup 15 mg / 7 mL
+3124546,Tramadol HCl,Kaplet 37.5 mg
+3124935,Pseudoephedrine HCl,"Sirup 7,5 mg/5 mL"
+3124886,Pseudoephedrine HCl,Sirup 15 mg/ 5 mL
+3125568,Pseudoephedrine HCl,Larutan 7.5mg/5 mL
+3126588,Tramadol HCl,Kapsul 50 mg
+3127638,Pseudoephedrine HCl,Sirup 30 mg/5mL
+3127299,Phenylpropanolamine HCl,Kaplet 15 mg
+3125440,Pseudoephedrine HCl,Sirup 30 mg/5mL
+3127944,Dextromethorphan HBr,Sirup 5 mg / 5 mL
+3129186,Pseudoephedrine HCl ,Sirup 30 mg/5mL
+3127919,Pseudoephedrine HCl,Larutan 7.5 mg/0.8mL
+0569293,Pseudoephedrine HCl,Sirup 7.5 mg/5mL
+3129225,Pseudoephedrine HCl ,Sirup 30 mg/5mL
