@@ -304,6 +304,25 @@ export default {
 
 
         // ===================================================
+        // ORDER DATE PER HALAMAN
+        //
+        // {{Tigabelas}} akan mengikuti
+        // Order Date pada halaman PDF sumber
+        // ===================================================
+
+        page =
+          page
+            .split(
+              "{{Tigabelas}}"
+            )
+            .join(
+              escapeHtml(
+                products.orderDate || ""
+              )
+            );
+
+
+        // ===================================================
         // HILANGKAN PLACEHOLDER YANG MASIH TERSISA
         // ===================================================
 
@@ -610,11 +629,27 @@ async function extractPdfText(
       );
 
 
+    // ===================================================
+    // ORDER DATE
+    //
+    // Ambil Order Date dari halaman ini.
+    // Contoh:
+    // Order Date: 25-08-2026
+    // ===================================================
+
+    const orderDate =
+      extractOrderDate(
+        lines
+      );
+
+
     pages.push({
 
       pageNumber,
 
-      lines
+      lines,
+
+      orderDate
 
     });
   }
@@ -628,6 +663,46 @@ async function extractPdfText(
     pages
 
   };
+}
+
+
+// =========================================================
+// EXTRACT ORDER DATE
+// =========================================================
+
+function extractOrderDate(
+  lines
+) {
+
+  for (
+    const line of lines
+  ) {
+
+    const text =
+      String(
+        line || ""
+      )
+        .replace(
+          /\s+/g,
+          " "
+        )
+        .trim();
+
+
+    const match =
+      text.match(
+        /Order\s*Date\s*:\s*(\d{2}-\d{2}-\d{4})/i
+      );
+
+
+    if (match) {
+
+      return match[1];
+    }
+  }
+
+
+  return "";
 }
 
 
@@ -754,6 +829,17 @@ function parseProductsByPage(
     if (
       products.length > 0
     ) {
+
+      // =================================================
+      // SIMPAN ORDER DATE PADA DATA PRODUK HALAMAN INI
+      //
+      // Tidak mengubah struktur array products.
+      // Hanya menambahkan property orderDate.
+      // =================================================
+
+      products.orderDate =
+        page.orderDate || "";
+
 
       result.push(
         products
@@ -2034,4 +2120,4 @@ function response(
 
     }
   );
-};
+}
