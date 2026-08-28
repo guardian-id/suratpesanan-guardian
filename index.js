@@ -306,8 +306,14 @@ export default {
         // ===================================================
         // ORDER DATE PER HALAMAN
         //
-        // {{Tigabelas}} akan mengikuti
-        // Order Date pada halaman PDF sumber
+        // {{Tigabelas}} mengambil Order Date
+        // dari halaman PDF sumber yang bersangkutan.
+        //
+        // Contoh:
+        // Order Date : 2026-08-25
+        //
+        // menjadi:
+        // 25-08-2026
         // ===================================================
 
         page =
@@ -630,11 +636,7 @@ async function extractPdfText(
 
 
     // ===================================================
-    // ORDER DATE
-    //
-    // Ambil Order Date dari halaman ini.
-    // Contoh:
-    // Order Date: 25-08-2026
+    // ORDER DATE HALAMAN INI
     // ===================================================
 
     const orderDate =
@@ -669,18 +671,30 @@ async function extractPdfText(
 // =========================================================
 // EXTRACT ORDER DATE
 // =========================================================
+//
+// Format PDF:
+// Order Date : 2026-08-25
+//
+// Hasil:
+// 25-08-2026
+//
+// Dibuat cukup fleksibel apabila PDF.js
+// memisahkan teks menjadi beberapa bagian.
+// =========================================================
 
 function extractOrderDate(
   lines
 ) {
 
   for (
-    const line of lines
+    let i = 0;
+    i < lines.length;
+    i++
   ) {
 
     const text =
       String(
-        line || ""
+        lines[i] || ""
       )
         .replace(
           /\s+/g,
@@ -689,15 +703,89 @@ function extractOrderDate(
         .trim();
 
 
-    const match =
+    // ===================================================
+    // FORMAT NORMAL
+    //
+    // Order Date : 2026-08-25
+    // Order Date: 2026-08-25
+    // ===================================================
+
+    let match =
       text.match(
-        /Order\s*Date\s*:\s*(\d{2}-\d{2}-\d{4})/i
+        /Order\s*Date\s*:?\s*(\d{4})-(\d{2})-(\d{2})/i
       );
 
 
     if (match) {
 
-      return match[1];
+      const year =
+        match[1];
+
+      const month =
+        match[2];
+
+      const day =
+        match[3];
+
+
+      return `${day}-${month}-${year}`;
+    }
+
+
+    // ===================================================
+    // JIKA PDF.js MEMISAHKAN:
+    //
+    // Order Date :
+    // 2026-08-25
+    // ===================================================
+
+    if (
+      /Order\s*Date/i.test(
+        text
+      )
+    ) {
+
+      for (
+        let j = i + 1;
+        j < Math.min(
+          i + 3,
+          lines.length
+        );
+        j++
+      ) {
+
+        const nextText =
+          String(
+            lines[j] || ""
+          )
+            .replace(
+              /\s+/g,
+              " "
+            )
+            .trim();
+
+
+        const nextMatch =
+          nextText.match(
+            /(\d{4})-(\d{2})-(\d{2})/
+          );
+
+
+        if (nextMatch) {
+
+          const year =
+            nextMatch[1];
+
+          const month =
+            nextMatch[2];
+
+          const day =
+            nextMatch[3];
+
+
+          return `${day}-${month}-${year}`;
+        }
+      }
     }
   }
 
@@ -831,10 +919,7 @@ function parseProductsByPage(
     ) {
 
       // =================================================
-      // SIMPAN ORDER DATE PADA DATA PRODUK HALAMAN INI
-      //
-      // Tidak mengubah struktur array products.
-      // Hanya menambahkan property orderDate.
+      // SIMPAN ORDER DATE DARI HALAMAN INI
       // =================================================
 
       products.orderDate =
