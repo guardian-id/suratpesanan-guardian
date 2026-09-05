@@ -329,6 +329,48 @@ export default {
 
 
         // ===================================================
+        // {{Empatbelas}} DAN {{Limabelas}}
+        //
+        // Mengambil dari Order Date halaman PDF sumber
+        //
+        // Contoh:
+        // Order Date : 2026-08-25
+        //
+        // {{Empatbelas}} = VIII
+        // {{Limabelas}} = 2026
+        // ===================================================
+
+        const orderDateParts =
+          getOrderDateParts(
+            products.orderDate
+          );
+
+
+        page =
+          page
+            .split(
+              "{{Empatbelas}}"
+            )
+            .join(
+              escapeHtml(
+                orderDateParts.monthRoman
+              )
+            );
+
+
+        page =
+          page
+            .split(
+              "{{Limabelas}}"
+            )
+            .join(
+              escapeHtml(
+                orderDateParts.year
+              )
+            );
+
+
+        // ===================================================
         // HILANGKAN PLACEHOLDER YANG MASIH TERSISA
         // ===================================================
 
@@ -791,6 +833,84 @@ function extractOrderDate(
 
 
   return "";
+}
+
+
+// =========================================================
+// ORDER DATE → BULAN ROMAWI + TAHUN
+// =========================================================
+//
+// Contoh:
+// 25-08-2026
+//
+// monthRoman = VIII
+// year       = 2026
+// =========================================================
+
+function getOrderDateParts(
+  orderDate
+) {
+
+  const value =
+    String(
+      orderDate || ""
+    ).trim();
+
+
+  const match =
+    value.match(
+      /^(\d{2})-(\d{2})-(\d{4})$/
+    );
+
+
+  if (!match) {
+
+    return {
+
+      monthRoman:
+        "",
+
+      year:
+        ""
+
+    };
+  }
+
+
+  const month =
+    match[2];
+
+  const year =
+    match[3];
+
+
+  const monthRomanMap = {
+
+    "01": "I",
+    "02": "II",
+    "03": "III",
+    "04": "IV",
+    "05": "V",
+    "06": "VI",
+    "07": "VII",
+    "08": "VIII",
+    "09": "IX",
+    "10": "X",
+    "11": "XI",
+    "12": "XII"
+
+  };
+
+
+  return {
+
+    monthRoman:
+      monthRomanMap[month] || "",
+
+    year:
+      year
+
+  };
 }
 
 
