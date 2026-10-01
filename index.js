@@ -1236,7 +1236,7 @@ function buildMedicineTable(
 
     const jumlah =
       formatJumlah(
-        product.casePack
+        product.qty
       );
 
 
