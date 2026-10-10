@@ -1101,10 +1101,39 @@ function parseProductLine(
   // Contoh: "51160106 JN" atau "300526 07:34"
   // ===========================================================
 
-  const endMatch =
+  let endMatch =
     rest.match(
       /^(.+?)\s+([A-Za-z]+)\s+(\d+)\s+(\d+)\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
     );
+
+
+  // ===========================================================
+  // KEMASAN KOSONG DI PDF SUMBER
+  // Baris tetap dibaca, kemasan dikosongkan
+  // ===========================================================
+
+  if (!endMatch) {
+
+    const noKemasan =
+      rest.match(
+        /^(.+?)\s+(\d+)\s+(\d+)\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s+(\d+)$/
+      );
+
+
+    if (noKemasan) {
+
+      endMatch = [
+        noKemasan[0],
+        noKemasan[1],
+        "",
+        noKemasan[2],
+        noKemasan[3],
+        noKemasan[4],
+        noKemasan[5],
+        noKemasan[6]
+      ];
+    }
+  }
 
 
   if (!endMatch) {
