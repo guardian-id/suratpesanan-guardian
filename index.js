@@ -110,7 +110,9 @@ export default {
         "Sembilan",
         "Sepuluh",
         "Sebelas",
-        "Duabelas"
+        "Duabelas",
+        "Empatbelas",
+        "Limabelas"
 
       ];
 
