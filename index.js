@@ -339,7 +339,10 @@ export default {
         // Order Date : 2026-08-25
         //
         // {{Empatbelas}} = VIII
-        // {{Limabelas}} = 2026
+        // {{Limabelas}}  = 2026
+        //
+        // (Enambelas dan Tujuhbelas dikirim flow
+        // lewat array fields di atas.)
         // ===================================================
 
         const orderDateParts =
