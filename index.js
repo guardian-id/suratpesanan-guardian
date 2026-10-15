@@ -111,8 +111,8 @@ export default {
         "Sepuluh",
         "Sebelas",
         "Duabelas",
-        "Empatbelas",
-        "Limabelas"
+        "Enambelas",
+        "Tujuhbelas"
 
       ];
 
