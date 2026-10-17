@@ -2257,9 +2257,9 @@ function addPdfCss(
 
         top: -5px;
 
-        width: 120px;
+        width: 150px;
 
-        height: 120px;
+        height: 130px;
 
         object-fit: contain;
 
