@@ -663,7 +663,7 @@ function addPdfCss(html) {
       .signature-container .stamp {
         position: absolute;
         left: 40px;
-        top: -25px;
+        top: -5px;
         width: 150px;
         height: 110px;
         object-fit: contain;
